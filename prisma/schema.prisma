@@ -1,0 +1,247 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Model untuk pemilik (owner)
+model Owner {
+  id          String   @id @default(uuid())
+  name        String
+  email       String   @unique
+  phoneNumber String
+  password    String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Model untuk pelanggan
+model Customer {
+  id                       String        @id @default(uuid())
+  name                     String
+  email                    String        @unique
+  phoneNumber              String
+  password                 String
+  isVerified               Boolean       @default(false)
+  isResetPasswordVerified  Boolean       @default(false)
+  verificationOtp          String?
+  verificationOtpCreatedAt DateTime?
+  resetPasswordOtp         String?
+  resetOtpCreatedAt        DateTime?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+  reservations             Reservation[]
+  ratings                  Rating[]
+}
+
+// Model untuk staff
+model Staff {
+  id             String        @id @default(uuid())
+  name           String
+  email          String        @unique
+  phoneNumber    String
+  address        String?
+  profilePicture String?
+  isActive       Boolean       @default(true) // Status aktif/nonaktif (cuti)
+  specialization String? // Spesialisasi staf (jika ada)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  sessions       Session[] // Sesi yang ditangani oleh staf
+  reservations   Reservation[]
+}
+
+// Kategori layanan
+model ServiceCategory {
+  id          String    @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  services    Service[]
+}
+
+// Layanan yang ditawarkan
+model Service {
+  id            String          @id @default(uuid())
+  name          String
+  description   String
+  price         Float
+  duration      Int // Durasi dalam menit
+  minBabyAge    Int // Umur minimal bayi dalam bulan
+  maxBabyAge    Int // Umur maksimal bayi dalam bulan
+  imageUrl      String? // URL gambar layanan (disimpan di Cloudinary)
+  isActive      Boolean         @default(true) // Status aktif/nonaktif
+  categoryId    String
+  category      ServiceCategory @relation(fields: [categoryId], references: [id])
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  reservations  Reservation[]
+  ratings       Rating[]
+  averageRating Float?
+}
+
+// Jadwal operasional harian (07.00-15.00)
+model OperatingSchedule {
+  id        String     @id @default(uuid())
+  date      DateTime // Tanggal operasional
+  isHoliday Boolean    @default(false) // Apakah hari libur
+  notes     String? // Catatan khusus untuk hari tersebut
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  timeSlots TimeSlot[]
+
+  @@unique([date]) // Memastikan tidak ada duplikasi jadwal untuk tanggal yang sama
+}
+
+// Timeslot untuk setiap jam operasional (07.00-15.00, durasi 1 jam)
+model TimeSlot {
+  id                  String            @id @default(uuid())
+  operatingScheduleId String
+  operatingSchedule   OperatingSchedule @relation(fields: [operatingScheduleId], references: [id], onDelete: Cascade)
+  startTime           DateTime // Waktu mulai (misalnya 07:00)
+  endTime             DateTime // Waktu selesai (misalnya 08:00)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  sessions            Session[] // Sesi yang tersedia pada timeslot ini
+
+  @@unique([operatingScheduleId, startTime, endTime]) // Memastikan tidak ada duplikasi timeslot pada jadwal yang sama
+}
+
+// Sesi dalam timeslot (berdasarkan jumlah staff aktif)
+model Session {
+  id          String       @id @default(uuid())
+  timeSlotId  String
+  timeSlot    TimeSlot     @relation(fields: [timeSlotId], references: [id], onDelete: Cascade)
+  staffId     String
+  staff       Staff        @relation(fields: [staffId], references: [id])
+  isBooked    Boolean      @default(false) // Status apakah sudah dipesan
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  reservation Reservation?
+
+  @@unique([timeSlotId, staffId]) // Satu staf hanya dapat menangani satu sesi dalam satu timeslot
+}
+
+// Rating layanan
+model Rating {
+  id         String   @id @default(uuid())
+  rating     Float // Rating 1-5
+  comment    String?
+  serviceId  String
+  service    Service  @relation(fields: [serviceId], references: [id])
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  createdAt  DateTime @default(now())
+}
+
+// Status reservasi
+enum ReservationStatus {
+  PENDING
+  CONFIRMED // Setelah pembayaran berhasil
+  IN_PROGRESS // Saat layanan sedang dilakukan
+  COMPLETED // Setelah layanan selesai
+  CANCELLED // Jika reservasi dibatalkan
+  EXPIRED // Jika reservasi tidak dibayar dalam batas waktu
+}
+
+// Status pembayaran
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  EXPIRED
+  REFUNDED
+}
+
+// Metode pembayaran
+enum PaymentMethod {
+  BANK_TRANSFER
+  CREDIT_CARD
+  QRIS
+  E_WALLET
+  RETAIL_OUTLET
+}
+
+// Tipe reservasi
+enum ReservationType {
+  ONLINE // Reservasi melalui aplikasi
+  MANUAL // Reservasi manual oleh owner
+}
+
+// Reservasi
+model Reservation {
+  id              String            @id @default(uuid())
+  reservationType ReservationType   @default(ONLINE)
+  customerId      String
+  customer        Customer          @relation(fields: [customerId], references: [id])
+  serviceId       String
+  service         Service           @relation(fields: [serviceId], references: [id])
+  staffId         String
+  staff           Staff             @relation(fields: [staffId], references: [id])
+  sessionId       String            @unique
+  session         Session           @relation(fields: [sessionId], references: [id])
+  notes           String? // Catatan khusus untuk reservasi
+  babyName        String
+  babyAge         Int // Umur bayi dalam bulan
+  totalPrice      Float
+  status          ReservationStatus @default(PENDING)
+  createdByOwner  Boolean           @default(false) // Apakah dibuat oleh owner (manual)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  payment         Payment?
+}
+
+// Pembayaran
+model Payment {
+  id                 String        @id @default(uuid())
+  reservationId      String        @unique
+  reservation        Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  amount             Float
+  paymentMethod      PaymentMethod
+  paymentStatus      PaymentStatus @default(PENDING)
+  transactionId      String? // ID transaksi dari Midtrans
+  snapToken          String? // Token untuk Midtrans Snap
+  paymentDate        DateTime?
+  expiryDate         DateTime // Batas waktu pembayaran
+  paymentProof       String? // URL bukti pembayaran (jika manual)
+  midtransPaymentUrl String? // URL pembayaran dari Midtrans
+  midtransResponse   Json? // Respons lengkap dari Midtrans
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+// Analitik untuk owner
+model Analytics {
+  id                String   @id @default(uuid())
+  date              DateTime @unique
+  totalRevenue      Float    @default(0)
+  totalBookings     Int      @default(0)
+  completedBookings Int      @default(0)
+  cancelledBookings Int      @default(0)
+  popularServiceId  String? // Layanan terpopuler pada hari itu
+  popularStaffId    String? // Staf terpopuler pada hari itu
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// Notifikasi
+model Notification {
+  id            String   @id @default(uuid())
+  recipientType String // 'owner' atau 'customer'
+  recipientId   String // ID pemilik atau pelanggan
+  title         String
+  message       String
+  isRead        Boolean  @default(false)
+  type          String // Tipe notifikasi: reservation, payment, system, etc.
+  referenceId   String? // ID referensi jika ada (misalnya reservationId)
+  createdAt     DateTime @default(now())
+}
