@@ -15,6 +15,7 @@ router.post("/verify-reset-otp", customerController.verifyResetOtp);
 router.post("/reset-password", customerController.resetPassword);
 
 router.use(customerAuth);
+router.put("/update/:id", customerController.updateDataCustomer);
 router.get("/profile", customerController.getCustomerProfile);
 
 router.use(errorHandler);

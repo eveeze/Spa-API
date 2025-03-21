@@ -7,6 +7,9 @@ import dotenv from "dotenv";
 // import routes
 import customerRoutes from "./routes/customerRoutes.js";
 import ownerRoutes from "./routes/ownerRoutes.js";
+import staffRoutes from "./routes/staffRoutes.js";
+import serviceRoutes from "./routes/serviceRoutes.js";
+import serviceCategoryRoutes from "./routes/serviceCategoryRoutes.js";
 dotenv.config();
 
 const app = express();
@@ -17,6 +20,9 @@ app.use(express.json());
 // define routes
 app.use("/api/customer", customerRoutes);
 app.use("/api/owner", ownerRoutes);
+app.use("/api/staff", staffRoutes);
+app.use("/api/service-category", serviceCategoryRoutes);
+app.use("/api/service", serviceRoutes);
 
 const PORT = process.env.PORT || 5000;
 

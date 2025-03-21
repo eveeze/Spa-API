@@ -3,8 +3,10 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import {
+  findAllPelanggan,
   findPelangganByEmail,
   findPelangganById,
+  updatePelanggan,
 } from "../repository/customerRepository.js";
 import { generateOTP, sendOtp } from "../utils/email.js";
 import prisma from "../config/db.js";
@@ -136,7 +138,7 @@ const login = async (req, res) => {
         role: "customer",
       },
       process.env.JWT_SECRET,
-      { expiresIn: "24h" }
+      { expiresIn: "24h" },
     );
 
     return res.status(200).json({
@@ -272,6 +274,37 @@ const resetPassword = async (req, res) => {
   }
 };
 
+const updateDataCustomer = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, phoneNumber, password } = req.body;
+
+    const customer = await findPelangganById(id);
+    if (!customer) {
+      return res.status(404).json({ message: "Akun tidak ditemukan" });
+    }
+
+    const data = { name, phoneNumber };
+
+    if (password) {
+      const salt = parseInt(process.env.SALT);
+      const hashedPassword = await bcrypt.hash(salt, password);
+      data.password = hashedPassword;
+    }
+
+    const updatedCustomer = await updatePelanggan(id, data);
+    return res.status(200).json({
+      messsage: "Berhasil memperbarui data",
+      custoemr: updatedCustomer,
+    });
+  } catch (err) {
+    console.error(err.message);
+    return res.status(500).json({
+      message: "terjadi kesalahan pada server",
+    });
+  }
+};
+
 const getCustomerProfile = async (req, res) => {
   try {
     const { id } = req.customer;
@@ -285,6 +318,25 @@ const getCustomerProfile = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+const getAllCustomer = async (req, res) => {
+  try {
+    const customer = findAllPelanggan();
+    if (!customer) {
+      return res.status(404).json({
+        message: "Data customer masih kosong",
+      });
+    }
+    return res
+      .status(200)
+      .json({ message: "berhasil mengambil data csutomer" }, customer);
+  } catch (err) {
+    console.error(err.message);
+    return res.status(500).json({
+      message: "terjadi kesalahan pada server",
+    });
+  }
+};
 const customerController = {
   register,
   verifyOtp,
@@ -293,7 +345,9 @@ const customerController = {
   forgotPassword,
   verifyResetOtp,
   resetPassword,
+  updateDataCustomer,
   getCustomerProfile,
+  getAllCustomer,
 };
 
 export default customerController;

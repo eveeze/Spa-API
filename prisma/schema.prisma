@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -52,7 +49,6 @@ model Staff {
   address        String?
   profilePicture String?
   isActive       Boolean       @default(true) // Status aktif/nonaktif (cuti)
-  specialization String? // Spesialisasi staf (jika ada)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   sessions       Session[] // Sesi yang ditangani oleh staf
@@ -74,19 +70,36 @@ model Service {
   id            String          @id @default(uuid())
   name          String
   description   String
-  price         Float
   duration      Int // Durasi dalam menit
-  minBabyAge    Int // Umur minimal bayi dalam bulan
-  maxBabyAge    Int // Umur maksimal bayi dalam bulan
   imageUrl      String? // URL gambar layanan (disimpan di Cloudinary)
   isActive      Boolean         @default(true) // Status aktif/nonaktif
   categoryId    String
+  hasPriceTiers Boolean         @default(false) // Apakah layanan memiliki price tiers berdasarkan umur
+  price         Float? // Harga default jika tidak menggunakan price tiers
+  minBabyAge    Int? // Umur minimal bayi dalam bulan (jika tidak menggunakan price tiers)
+  maxBabyAge    Int? // Umur maksimal bayi dalam bulan (jika tidak menggunakan price tiers)
   category      ServiceCategory @relation(fields: [categoryId], references: [id])
+  priceTiers    PriceTier[]
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   reservations  Reservation[]
   ratings       Rating[]
   averageRating Float?
+}
+
+// Model untuk price tiers berdasarkan umur bayi
+model PriceTier {
+  id         String   @id @default(uuid())
+  serviceId  String
+  service    Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  tierName   String // Nama tier, contoh: "Bayi 0-15 bulan", "Balita 2-5 tahun"
+  minBabyAge Int // Batas bawah umur dalam bulan
+  maxBabyAge Int // Batas atas umur dalam bulan
+  price      Float // Harga untuk tier ini
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([serviceId, minBabyAge, maxBabyAge]) // Memastikan tidak ada overlap range umur untuk service yang sama
 }
 
 // Jadwal operasional harian (07.00-15.00)
@@ -192,6 +205,7 @@ model Reservation {
   notes           String? // Catatan khusus untuk reservasi
   babyName        String
   babyAge         Int // Umur bayi dalam bulan
+  priceTierId     String? // ID price tier jika menggunakan layanan dengan price tiers
   totalPrice      Float
   status          ReservationStatus @default(PENDING)
   createdByOwner  Boolean           @default(false) // Apakah dibuat oleh owner (manual)

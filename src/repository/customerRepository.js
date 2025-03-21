@@ -30,6 +30,19 @@ export const updatePelanggan = async (id, data) => {
   const customer = await prisma.customer.update({
     where: { id },
     data,
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phoneNumber: true,
+      isVerified: true,
+      createdAt: true,
+    },
   });
+  return customer;
+};
+
+export const findAllPelanggan = async () => {
+  const customer = await prisma.customer.findMany();
   return customer;
 };
