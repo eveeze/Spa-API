@@ -14,7 +14,7 @@ import { deleteImage } from "../utils/cloudinary.js";
  */
 const createNewStaff = async (req, res) => {
   try {
-    const { name, email, phoneNumber, address, specialization } = req.body;
+    const { name, email, phoneNumber, address } = req.body;
 
     // Validate required fields
     if (!name || !email || !phoneNumber) {
@@ -30,7 +30,6 @@ const createNewStaff = async (req, res) => {
       email,
       phoneNumber,
       address,
-      specialization,
     };
 
     if (req.file) {
@@ -128,8 +127,7 @@ const getStaffMemberById = async (req, res) => {
 const updateStaffMember = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, email, phoneNumber, address, specialization, isActive } =
-      req.body;
+    const { name, email, phoneNumber, address, isActive } = req.body;
 
     // Check if staff exists
     const existingStaff = await getStaffById(id);
@@ -146,8 +144,6 @@ const updateStaffMember = async (req, res) => {
     if (email) updateData.email = email;
     if (phoneNumber) updateData.phoneNumber = phoneNumber;
     if (address !== undefined) updateData.address = address; // Allow empty string
-    if (specialization !== undefined)
-      updateData.specialization = specialization; // Allow empty string
     if (isActive !== undefined)
       updateData.isActive = isActive === "true" || isActive === true;
 

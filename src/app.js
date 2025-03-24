@@ -10,6 +10,7 @@ import ownerRoutes from "./routes/ownerRoutes.js";
 import staffRoutes from "./routes/staffRoutes.js";
 import serviceRoutes from "./routes/serviceRoutes.js";
 import serviceCategoryRoutes from "./routes/serviceCategoryRoutes.js";
+import operatingScheduleRoutes from "./routes/operatingScheduleRoutes.js";
 dotenv.config();
 
 const app = express();
@@ -23,6 +24,7 @@ app.use("/api/owner", ownerRoutes);
 app.use("/api/staff", staffRoutes);
 app.use("/api/service-category", serviceCategoryRoutes);
 app.use("/api/service", serviceRoutes);
+app.use("/api/operating-schedule", operatingScheduleRoutes);
 
 const PORT = process.env.PORT || 5000;
 

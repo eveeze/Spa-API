@@ -10,7 +10,7 @@ import {
   toggleServiceStatusHandler,
   getServicePriceTierHandler,
 } from "../controller/serviceController.js";
-import { ownerAuth, customerAuth } from "../middlewares/authMiddleware.js";
+import { ownerAuth } from "../middlewares/authMiddleware.js";
 import { serviceImageUploadMiddleware } from "../middlewares/imageUploadMiddleware.js";
 
 const router = express.Router();
