@@ -1,4 +1,4 @@
-// middleware/authMiddleware.js
+// middlewares/authMiddleware.js
 import jwt from "jsonwebtoken";
 import prisma from "../config/db.js";
 

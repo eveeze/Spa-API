@@ -5,12 +5,6 @@ import { ownerAuth } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
-// Apply owner authentication middleware to all routes
-router.use(ownerAuth);
-
-// Create a new operating schedule
-router.post("/", operatingScheduleController.createNewOperatingSchedule);
-
 // Get all operating schedules
 router.get("/", operatingScheduleController.getAllSchedules);
 
@@ -19,6 +13,11 @@ router.get("/:id", operatingScheduleController.getScheduleById);
 
 // Get operating schedule by date
 router.get("/date/:date", operatingScheduleController.getScheduleByDate);
+
+router.use(ownerAuth);
+
+// Create a new operating schedule
+router.post("/", operatingScheduleController.createNewOperatingSchedule);
 
 // Update operating schedule
 router.put("/:id", operatingScheduleController.updateSchedule);
