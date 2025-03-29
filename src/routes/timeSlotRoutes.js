@@ -4,8 +4,7 @@ import timeSlotController from "../controller/timeSlotController.js";
 import { ownerAuth } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
-
-// Routes that require owner authentication
+// owner routes
 router.post("/", ownerAuth, timeSlotController.createNewTimeSlot);
 router.put("/:id", ownerAuth, timeSlotController.updateTimeSlotHandler);
 router.delete("/:id", ownerAuth, timeSlotController.deleteTimeSlotHandler);
@@ -15,7 +14,7 @@ router.post(
   timeSlotController.createMultipleTimeSlotsHandler,
 );
 
-// Routes that are accessible without authentication
+// public routes
 router.get("/", timeSlotController.getAllTimeSlotsHandler);
 router.get("/:id", timeSlotController.getTimeSlotByIdHandler);
 router.get(

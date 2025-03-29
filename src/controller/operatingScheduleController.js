@@ -1,4 +1,4 @@
-// src/controllers/operatingScheduleController.js
+// src/controller/operatingScheduleController.js
 import {
   createOperatingSchedule,
   getAllOperatingSchedules,
@@ -230,7 +230,7 @@ const deleteSchedule = async (req, res) => {
 
     // Check if there are any reservations associated with this schedule's time slots
     const hasReservations = existingSchedule.timeSlots.some((timeSlot) =>
-      timeSlot.sessions.some((session) => session.reservation !== null)
+      timeSlot.sessions.some((session) => session.reservation !== null),
     );
 
     if (hasReservations) {
