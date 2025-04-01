@@ -13,6 +13,33 @@ import {
 import { getOperatingScheduleById } from "../repository/operatingScheduleRepository.js";
 
 /**
+ * Check if a time falls on the same date as the operating schedule
+ * @param {Date} time - The time to check
+ * @param {Date} scheduleDate - The operating schedule date
+ * @returns {Boolean} True if the time is on the same date as the schedule
+ */
+
+const isOnSameDate = (time, scheduleDate) => {
+  // Convert both dates to UTC first to standardize comparison
+  const timeDate = new Date(time);
+  const scheduleDateObj = new Date(scheduleDate);
+
+  // Extract UTC date components
+  const timeYear = timeDate.getUTCFullYear();
+  const timeMonth = timeDate.getUTCMonth();
+  const timeDay = timeDate.getUTCDate();
+
+  const scheduleYear = scheduleDateObj.getUTCFullYear();
+  const scheduleMonth = scheduleDateObj.getUTCMonth();
+  const scheduleDay = scheduleDateObj.getUTCDate();
+
+  return (
+    timeYear === scheduleYear &&
+    timeMonth === scheduleMonth &&
+    timeDay === scheduleDay
+  );
+};
+/**
  * Create a new time slot
  */
 const createNewTimeSlot = async (req, res) => {
@@ -64,6 +91,17 @@ const createNewTimeSlot = async (req, res) => {
       });
     }
 
+    // Check if time slot date and the operating schedule date is same
+    if (
+      !isOnSameDate(startDate, schedule.date) ||
+      !isOnSameDate(endDate, schedule.date)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Time slot must be on the same date as the operating schedule",
+      });
+    }
+
     // Check if the time slot overlaps with existing time slots
     const existingTimeSlot = await getExistingTimeSlot(
       operatingScheduleId,
@@ -99,98 +137,6 @@ const createNewTimeSlot = async (req, res) => {
 };
 
 /**
- * Get all time slots with optional filters
- */
-const getAllTimeSlotsHandler = async (req, res) => {
-  try {
-    const { operatingScheduleId, date, startTime, endTime } = req.query;
-
-    // Get all time slots with optional filters
-    const timeSlots = await getAllTimeSlots({
-      operatingScheduleId,
-      date,
-      startTime,
-      endTime,
-    });
-
-    res.status(200).json({
-      success: true,
-      count: timeSlots.length,
-      data: timeSlots,
-    });
-  } catch (error) {
-    console.error("[GET ALL TIME SLOTS ERROR]:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch time slots",
-    });
-  }
-};
-
-/**
- * Get time slot by ID
- */
-const getTimeSlotByIdHandler = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Get time slot by ID
-    const timeSlot = await getTimeSlotById(id);
-
-    if (!timeSlot) {
-      return res.status(404).json({
-        success: false,
-        message: "Time slot not found",
-      });
-    }
-
-    res.status(200).json({
-      success: true,
-      data: timeSlot,
-    });
-  } catch (error) {
-    console.error("[GET TIME SLOT BY ID ERROR]:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch time slot",
-    });
-  }
-};
-
-/**
- * Get time slots by operating schedule ID
- */
-const getTimeSlotsByScheduleIdHandler = async (req, res) => {
-  try {
-    const { scheduleId } = req.params;
-
-    // Check if operating schedule exists
-    const schedule = await getOperatingScheduleById(scheduleId);
-    if (!schedule) {
-      return res.status(404).json({
-        success: false,
-        message: "Operating schedule not found",
-      });
-    }
-
-    // Get time slots by schedule ID
-    const timeSlots = await getTimeSlotsByScheduleId(scheduleId);
-
-    res.status(200).json({
-      success: true,
-      count: timeSlots.length,
-      data: timeSlots,
-    });
-  } catch (error) {
-    console.error("[GET TIME SLOTS BY SCHEDULE ID ERROR]:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch time slots",
-    });
-  }
-};
-
-/**
  * Update time slot by ID
  */
 const updateTimeSlotHandler = async (req, res) => {
@@ -209,6 +155,9 @@ const updateTimeSlotHandler = async (req, res) => {
 
     // Prepare update data
     const updateData = {};
+    let scheduleToCheck = await getOperatingScheduleById(
+      existingTimeSlot.operatingScheduleId,
+    );
 
     // Check if operating schedule is changing
     if (
@@ -233,6 +182,7 @@ const updateTimeSlotHandler = async (req, res) => {
       }
 
       updateData.operatingScheduleId = operatingScheduleId;
+      scheduleToCheck = schedule;
     }
 
     // Process time updates
@@ -263,6 +213,17 @@ const updateTimeSlotHandler = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: "End time must be after start time",
+      });
+    }
+
+    // NEW CHECK: Ensure updated time slot is on the same date as the operating schedule
+    if (
+      !isOnSameDate(effectiveStartTime, scheduleToCheck.date) ||
+      !isOnSameDate(effectiveEndTime, scheduleToCheck.date)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Time slot must be on the same date as the operating schedule",
       });
     }
 
@@ -319,97 +280,12 @@ const updateTimeSlotHandler = async (req, res) => {
 };
 
 /**
- * Delete time slot by ID
- */
-const deleteTimeSlotHandler = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Check if time slot exists
-    const timeSlot = await getTimeSlotById(id);
-    if (!timeSlot) {
-      return res.status(404).json({
-        success: false,
-        message: "Time slot not found",
-      });
-    }
-
-    // Check if there are any sessions with reservations
-    const hasBookedSessions = timeSlot.sessions.some(
-      (session) => session.isBooked || session.reservation !== null,
-    );
-
-    if (hasBookedSessions) {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot delete time slot with booked sessions",
-      });
-    }
-
-    // Delete time slot
-    await deleteTimeSlot(id);
-
-    res.status(200).json({
-      success: true,
-      message: "Time slot deleted successfully",
-    });
-  } catch (error) {
-    // Handle foreign key constraint error
-    if (error.code === "P2003") {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot delete time slot with associated sessions",
-      });
-    }
-
-    console.error("[DELETE TIME SLOT ERROR]:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to delete time slot",
-    });
-  }
-};
-
-/**
- * Get available time slots for a specific date
- */
-const getAvailableTimeSlotsHandler = async (req, res) => {
-  try {
-    const { date } = req.params;
-
-    // Validate date
-    if (!date || isNaN(new Date(date).getTime())) {
-      return res.status(400).json({
-        success: false,
-        message: "Valid date is required (YYYY-MM-DD)",
-      });
-    }
-
-    // Get available time slots
-    const availableTimeSlots = await getAvailableTimeSlots(date);
-
-    res.status(200).json({
-      success: true,
-      count: availableTimeSlots.length,
-      data: availableTimeSlots,
-    });
-  } catch (error) {
-    console.error("[GET AVAILABLE TIME SLOTS ERROR]:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to fetch available time slots",
-    });
-  }
-};
-
-/**
  * Create multiple time slots for an operating schedule
  */
 const createMultipleTimeSlotsHandler = async (req, res) => {
   try {
     const { operatingScheduleId, timeSlots } = req.body;
 
-    // Validate required fields
     if (
       !operatingScheduleId ||
       !Array.isArray(timeSlots) ||
@@ -466,6 +342,17 @@ const createMultipleTimeSlotsHandler = async (req, res) => {
         });
       }
 
+      // NEW CHECK: Ensure time slot is on the same date as the operating schedule
+      if (
+        !isOnSameDate(startDate, schedule.date) ||
+        !isOnSameDate(endDate, schedule.date)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: `Time slot (${startDate.toISOString()} - ${endDate.toISOString()}) must be on the same date as the operating schedule (${schedule.date.toISOString().split("T")[0]})`,
+        });
+      }
+
       // Check for overlaps with existing time slots
       const existingTimeSlot = await getExistingTimeSlot(
         operatingScheduleId,
@@ -515,6 +402,168 @@ const createMultipleTimeSlotsHandler = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to create time slots",
+    });
+  }
+};
+
+// Add other controller functions without changes
+const getAllTimeSlotsHandler = async (req, res) => {
+  try {
+    const { operatingScheduleId, date, startTime, endTime } = req.query;
+
+    // Get all time slots with optional filters
+    const timeSlots = await getAllTimeSlots({
+      operatingScheduleId,
+      date,
+      startTime,
+      endTime,
+    });
+
+    res.status(200).json({
+      success: true,
+      count: timeSlots.length,
+      data: timeSlots,
+    });
+  } catch (error) {
+    console.error("[GET ALL TIME SLOTS ERROR]:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch time slots",
+    });
+  }
+};
+
+const getTimeSlotByIdHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Get time slot by ID
+    const timeSlot = await getTimeSlotById(id);
+
+    if (!timeSlot) {
+      return res.status(404).json({
+        success: false,
+        message: "Time slot not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: timeSlot,
+    });
+  } catch (error) {
+    console.error("[GET TIME SLOT BY ID ERROR]:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch time slot",
+    });
+  }
+};
+
+const getTimeSlotsByScheduleIdHandler = async (req, res) => {
+  try {
+    const { scheduleId } = req.params;
+
+    // Check if operating schedule exists
+    const schedule = await getOperatingScheduleById(scheduleId);
+    if (!schedule) {
+      return res.status(404).json({
+        success: false,
+        message: "Operating schedule not found",
+      });
+    }
+
+    // Get time slots by schedule ID
+    const timeSlots = await getTimeSlotsByScheduleId(scheduleId);
+
+    res.status(200).json({
+      success: true,
+      count: timeSlots.length,
+      data: timeSlots,
+    });
+  } catch (error) {
+    console.error("[GET TIME SLOTS BY SCHEDULE ID ERROR]:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch time slots",
+    });
+  }
+};
+
+const deleteTimeSlotHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check if time slot exists
+    const timeSlot = await getTimeSlotById(id);
+    if (!timeSlot) {
+      return res.status(404).json({
+        success: false,
+        message: "Time slot not found",
+      });
+    }
+
+    // Check if there are any sessions with reservations
+    const hasBookedSessions = timeSlot.sessions.some(
+      (session) => session.isBooked || session.reservation !== null,
+    );
+
+    if (hasBookedSessions) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot delete time slot with booked sessions",
+      });
+    }
+
+    // Delete time slot
+    await deleteTimeSlot(id);
+
+    res.status(200).json({
+      success: true,
+      message: "Time slot deleted successfully",
+    });
+  } catch (error) {
+    // Handle foreign key constraint error
+    if (error.code === "P2003") {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot delete time slot with associated sessions",
+      });
+    }
+
+    console.error("[DELETE TIME SLOT ERROR]:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete time slot",
+    });
+  }
+};
+
+const getAvailableTimeSlotsHandler = async (req, res) => {
+  try {
+    const { date } = req.params;
+
+    // Validate date
+    if (!date || isNaN(new Date(date).getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid date is required (YYYY-MM-DD)",
+      });
+    }
+
+    // Get available time slots
+    const availableTimeSlots = await getAvailableTimeSlots(date);
+
+    res.status(200).json({
+      success: true,
+      count: availableTimeSlots.length,
+      data: availableTimeSlots,
+    });
+  } catch (error) {
+    console.error("[GET AVAILABLE TIME SLOTS ERROR]:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch available time slots",
     });
   }
 };
