@@ -12,6 +12,7 @@ import serviceRoutes from "./routes/serviceRoutes.js";
 import serviceCategoryRoutes from "./routes/serviceCategoryRoutes.js";
 import operatingScheduleRoutes from "./routes/operatingScheduleRoutes.js";
 import timeSlotRoutes from "./routes/timeSlotRoutes.js";
+import sessionRoutes from "./routes/sessionRoutes.js";
 dotenv.config();
 
 const app = express();
@@ -27,6 +28,7 @@ app.use("/api/service-category", serviceCategoryRoutes);
 app.use("/api/service", serviceRoutes);
 app.use("/api/operating-schedule", operatingScheduleRoutes);
 app.use("/api/time-slot", timeSlotRoutes);
+app.use("/api/session", sessionRoutes);
 const PORT = process.env.PORT || 5000;
 
 app.get("/", (req, res) => {

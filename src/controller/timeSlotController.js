@@ -216,7 +216,7 @@ const updateTimeSlotHandler = async (req, res) => {
       });
     }
 
-    // NEW CHECK: Ensure updated time slot is on the same date as the operating schedule
+    // Check if time slot date and the operating schedule date is same
     if (
       !isOnSameDate(effectiveStartTime, scheduleToCheck.date) ||
       !isOnSameDate(effectiveEndTime, scheduleToCheck.date)
@@ -342,7 +342,8 @@ const createMultipleTimeSlotsHandler = async (req, res) => {
         });
       }
 
-      // NEW CHECK: Ensure time slot is on the same date as the operating schedule
+      // Check if time slot date and the operating schedule date is same
+
       if (
         !isOnSameDate(startDate, schedule.date) ||
         !isOnSameDate(endDate, schedule.date)
@@ -406,12 +407,10 @@ const createMultipleTimeSlotsHandler = async (req, res) => {
   }
 };
 
-// Add other controller functions without changes
 const getAllTimeSlotsHandler = async (req, res) => {
   try {
     const { operatingScheduleId, date, startTime, endTime } = req.query;
 
-    // Get all time slots with optional filters
     const timeSlots = await getAllTimeSlots({
       operatingScheduleId,
       date,
@@ -437,7 +436,6 @@ const getTimeSlotByIdHandler = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get time slot by ID
     const timeSlot = await getTimeSlotById(id);
 
     if (!timeSlot) {

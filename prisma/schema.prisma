@@ -140,6 +140,7 @@ model Session {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   reservation Reservation?
+  // satu time slot bisa ada beberapa sesi berdasarkan jumlah staf aktif, jika ada 3 staf aktif, maka ada 3 sesi dalam satu time slot
 
   @@unique([timeSlotId, staffId]) // Satu staf hanya dapat menangani satu sesi dalam satu timeslot
 }
