@@ -144,20 +144,10 @@ const getExistingTimeSlot = async (
   let where = {
     operatingScheduleId,
     OR: [
-      // Case 1: New slot starts within an existing slot
-      {
-        startTime: { lte: startDate },
-        endTime: { gt: startDate },
-      },
-      // Case 2: New slot ends within an existing slot
+      // Modified overlap condition: slots overlap if one starts before the other ends AND ends after the other starts
       {
         startTime: { lt: endDate },
-        endTime: { gte: endDate },
-      },
-      // Case 3: New slot completely contains an existing slot
-      {
-        startTime: { gte: startDate },
-        endTime: { lte: endDate },
+        endTime: { gt: startDate },
       },
     ],
   };
@@ -171,7 +161,6 @@ const getExistingTimeSlot = async (
     where,
   });
 };
-
 /**
  * Update time slot by ID
  * @param {String} id - Time slot ID

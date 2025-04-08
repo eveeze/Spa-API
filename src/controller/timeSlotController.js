@@ -373,12 +373,8 @@ const createMultipleTimeSlotsHandler = async (req, res) => {
 
         const otherStartDate = new Date(otherSlot.startTime);
         const otherEndDate = new Date(otherSlot.endTime);
-
         // Check if slots overlap
-        if (
-          (startDate <= otherEndDate && endDate >= otherStartDate) ||
-          (otherStartDate <= endDate && otherEndDate >= startDate)
-        ) {
+        if (startDate < otherEndDate && endDate > otherStartDate) {
           return res.status(400).json({
             success: false,
             message: "Time slots in the request overlap with each other",
