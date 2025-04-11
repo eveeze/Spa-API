@@ -13,6 +13,7 @@ import serviceCategoryRoutes from "./routes/serviceCategoryRoutes.js";
 import operatingScheduleRoutes from "./routes/operatingScheduleRoutes.js";
 import timeSlotRoutes from "./routes/timeSlotRoutes.js";
 import sessionRoutes from "./routes/sessionRoutes.js";
+import reservationRoutes from "./routes/reservationRoutes.js";
 dotenv.config();
 
 const app = express();

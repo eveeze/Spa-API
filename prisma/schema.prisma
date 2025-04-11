@@ -217,22 +217,24 @@ model Reservation {
 
 // Pembayaran
 model Payment {
-  id                 String        @id @default(uuid())
-  reservationId      String        @unique
-  reservation        Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-  amount             Float
-  paymentMethod      PaymentMethod
-  paymentStatus      PaymentStatus @default(PENDING)
-  transactionId      String? // ID transaksi dari Midtrans
-  snapToken          String? // Token untuk Midtrans Snap
-  paymentDate        DateTime?
-  expiryDate         DateTime // Batas waktu pembayaran
-  paymentProof       String? // URL bukti pembayaran (jika manual)
-  midtransPaymentUrl String? // URL pembayaran dari Midtrans
-  midtransResponse   Json? // Respons lengkap dari Midtrans
-  createdAt          DateTime      @default(now())
-  updatedAt          DateTime      @updatedAt
+  id                String        @id @default(uuid())
+  reservationId     String        @unique
+  reservation       Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  amount            Float
+  paymentMethod     PaymentMethod
+  paymentStatus     PaymentStatus @default(PENDING)
+  transactionId     String? // ID transaksi dari Tripay
+  tripayToken       String? // Token untuk Tripay
+  paymentDate       DateTime?
+  expiryDate        DateTime // Batas waktu pembayaran
+  paymentProof      String? // URL bukti pembayaran (jika manual)
+  tripayPaymentUrl  String? // URL pembayaran dari Tripay
+  tripayInstructions Json? // Instruksi pembayaran dari Tripay
+  tripayResponse    Json? // Respons lengkap dari Tripay
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 }
+
 
 // Analitik untuk owner
 model Analytics {

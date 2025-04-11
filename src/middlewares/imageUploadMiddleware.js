@@ -1,4 +1,4 @@
-// middleware/imageUploadMiddleware.js
+// middlewares/imageUploadMiddleware.js
 import {
   uploadStaffProfile,
   uploadServiceImage,
