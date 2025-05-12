@@ -18,7 +18,6 @@ const staffProfileUploadMiddleware = (req, res, next) => {
       });
     }
 
-    // Add image URL to request if file was uploaded
     if (req.file) {
       req.profilePictureUrl = req.file.path;
     }
@@ -27,7 +26,6 @@ const staffProfileUploadMiddleware = (req, res, next) => {
   });
 };
 
-// Middleware for handling service image uploads
 const serviceImageUploadMiddleware = (req, res, next) => {
   const upload = uploadServiceImage.single("imageUrl");
 
@@ -39,7 +37,6 @@ const serviceImageUploadMiddleware = (req, res, next) => {
       });
     }
 
-    // Add image URL to request if file was uploaded
     if (req.file) {
       req.serviceImageUrl = req.file.path;
     }
@@ -48,7 +45,6 @@ const serviceImageUploadMiddleware = (req, res, next) => {
   });
 };
 
-// Middleware for handling payment proof uploads
 const paymentProofUploadMiddleware = (req, res, next) => {
   const upload = uploadPaymentProof.single("paymentProof");
 

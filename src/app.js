@@ -3,7 +3,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-
+import { initCronJobs } from "./config/cronScheduler.js";
 // import routes
 import customerRoutes from "./routes/customerRoutes.js";
 import ownerRoutes from "./routes/ownerRoutes.js";
@@ -14,6 +14,7 @@ import operatingScheduleRoutes from "./routes/operatingScheduleRoutes.js";
 import timeSlotRoutes from "./routes/timeSlotRoutes.js";
 import sessionRoutes from "./routes/sessionRoutes.js";
 import reservationRoutes from "./routes/reservationRoutes.js";
+import schedulerRoutes from "./routes/schedulerRoutes.js";
 dotenv.config();
 
 const app = express();
@@ -30,6 +31,7 @@ app.use("/api/service", serviceRoutes);
 app.use("/api/operating-schedule", operatingScheduleRoutes);
 app.use("/api/time-slot", timeSlotRoutes);
 app.use("/api/session", sessionRoutes);
+app.use("/api/scheduler", schedulerRoutes);
 const PORT = process.env.PORT || 5000;
 
 app.get("/", (req, res) => {
@@ -38,6 +40,10 @@ app.get("/", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server sudah berjalan di port : ${PORT}`);
+
+  const apiBaseUrl = process.env.API_BASE_URL || `http://localhost:${PORT}`;
+  initCronJobs(apiBaseUrl);
+  console.log("[CRON] Scheduler initialized");
 });
 
 export default app;

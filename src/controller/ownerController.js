@@ -38,8 +38,6 @@ const ownerLogin = async (req, res) => {
       email: owner.email,
       name: owner.name,
       phoneNumber: owner.phoneNumber,
-      profilePicture: owner.profilePicture,
-      address: owner.address,
     };
 
     res.status(200).json({
