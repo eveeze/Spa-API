@@ -1,4 +1,3 @@
-// src/repository/schedulerRepository.js
 import prisma from "../config/db.js";
 import { addDays, setHours, setMinutes, parseISO, addMinutes } from "date-fns";
 
@@ -55,9 +54,10 @@ export const generateOperatingSchedules = async (
 };
 
 /**
- * Generate time slots for operating schedules
+ * Generate time slots for operating schedules with proper time zone handling
  * @param {Array} operatingSchedules - Array of operating schedule objects
  * @param {Object} timeConfig - Configuration for time slots
+ * @param {Number} timeZoneOffset - Timezone offset in hours (from environment variable)
  * @returns {Object} Created time slots grouped by operatingScheduleId
  */
 export const generateTimeSlots = async (
@@ -66,7 +66,8 @@ export const generateTimeSlots = async (
     startHour: 7, // 7 AM
     endHour: 15, // 3 PM
     slotDurationMinutes: 60, // 1 hour slots
-  }
+  },
+  timeZoneOffset = parseInt(process.env.TIMEZONE_OFFSET || "7") // Default to Indonesia time (UTC+7)
 ) => {
   const timeSlotsBySchedule = {};
 
@@ -82,9 +83,17 @@ export const generateTimeSlots = async (
     let currentHour = timeConfig.startHour;
 
     while (currentHour < timeConfig.endHour) {
-      const startTime = new Date(scheduleDate);
-      startTime.setHours(currentHour, 0, 0, 0);
+      // Create a new date based on the schedule date
+      const localDate = new Date(scheduleDate);
+      // Set the local time
+      localDate.setHours(currentHour, 0, 0, 0);
 
+      // Convert local time to UTC for storage
+      // For UTC+7, this means subtracting 7 hours
+      const startTime = new Date(localDate);
+      startTime.setHours(startTime.getHours() - timeZoneOffset);
+
+      // Calculate end time (add slot duration)
       const endTime = new Date(startTime);
       endTime.setMinutes(endTime.getMinutes() + timeConfig.slotDurationMinutes);
 
@@ -225,6 +234,7 @@ export const generateSessions = async (timeSlotsBySchedule) => {
  * @param {Number} days - Number of days to generate
  * @param {Array} holidayDates - Dates to mark as holidays
  * @param {Object} timeConfig - Time slot configuration
+ * @param {Number} timeZoneOffset - Timezone offset from environment variable
  * @returns {Object} Generated schedules, time slots, and sessions
  */
 export const generateFullSchedule = async (
@@ -235,7 +245,8 @@ export const generateFullSchedule = async (
     startHour: 7,
     endHour: 15,
     slotDurationMinutes: 60,
-  }
+  },
+  timeZoneOffset = parseInt(process.env.TIMEZONE_OFFSET || "7") // Default to Indonesia time (UTC+7)
 ) => {
   // Generate operating schedules
   const operatingSchedules = await generateOperatingSchedules(
@@ -244,10 +255,11 @@ export const generateFullSchedule = async (
     holidayDates
   );
 
-  // Generate time slots for each operating schedule
+  // Generate time slots for each operating schedule with proper time zone handling
   const timeSlotsBySchedule = await generateTimeSlots(
     operatingSchedules,
-    timeConfig
+    timeConfig,
+    timeZoneOffset
   );
 
   // Generate sessions for each time slot

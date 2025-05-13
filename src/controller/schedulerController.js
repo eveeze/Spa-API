@@ -1,4 +1,3 @@
-// src/controller/schedulerController.js
 import { parseISO, addDays } from "date-fns";
 import {
   generateOperatingSchedules,
@@ -6,6 +5,11 @@ import {
   generateSessions,
   generateFullSchedule,
 } from "../repository/schedulerRepository.js";
+import prisma from "../config/db.js";
+import dotenv from "dotenv";
+
+// Ensure environment variables are loaded
+dotenv.config();
 
 /**
  * Generate full schedule (operating schedules, time slots, and sessions)
@@ -13,12 +17,26 @@ import {
  */
 export const generateSchedule = async (req, res) => {
   try {
-    const { startDate, days = 7, holidayDates = [], timeConfig } = req.body;
+    const {
+      startDate,
+      days = 7,
+      holidayDates = [],
+      timeConfig,
+      timeZoneOffset,
+    } = req.body;
+
+    // Get timezone offset from environment or use provided value or default
+    const tzOffset =
+      timeZoneOffset !== undefined
+        ? parseInt(timeZoneOffset)
+        : process.env.TIMEZONE_OFFSET
+        ? parseInt(process.env.TIMEZONE_OFFSET)
+        : 7; // Default to Indonesia time (UTC+7)
 
     // Parse start date or use current date
     const parsedStartDate = startDate ? parseISO(startDate) : new Date();
 
-    // Generate full schedule
+    // Generate full schedule with timezone support
     const result = await generateFullSchedule(
       parsedStartDate,
       parseInt(days),
@@ -27,7 +45,8 @@ export const generateSchedule = async (req, res) => {
         startHour: 7,
         endHour: 15,
         slotDurationMinutes: 60,
-      }
+      },
+      tzOffset
     );
 
     res.status(201).json({
@@ -72,8 +91,23 @@ export const runScheduledGeneration = async (req, res) => {
     // Start from tomorrow to avoid duplicate schedules
     const startDate = addDays(new Date(), 1);
 
-    // Generate 7 days of schedules
-    const result = await generateFullSchedule(startDate, 7);
+    // Get timezone offset from environment or use default Indonesia timezone (UTC+7)
+    const timeZoneOffset = process.env.TIMEZONE_OFFSET
+      ? parseInt(process.env.TIMEZONE_OFFSET)
+      : 7;
+
+    // Generate 7 days of schedules with proper timezone handling
+    const result = await generateFullSchedule(
+      startDate,
+      7,
+      [],
+      {
+        startHour: 7,
+        endHour: 15,
+        slotDurationMinutes: 60,
+      },
+      timeZoneOffset
+    );
 
     res.status(200).json({
       success: true,
@@ -107,7 +141,16 @@ export const generateScheduleComponents = async (req, res) => {
       days = 7,
       holidayDates = [],
       timeConfig,
+      timeZoneOffset,
     } = req.body;
+
+    // Get timezone offset from environment or use provided value or default
+    const tzOffset =
+      timeZoneOffset !== undefined
+        ? parseInt(timeZoneOffset)
+        : process.env.TIMEZONE_OFFSET
+        ? parseInt(process.env.TIMEZONE_OFFSET)
+        : 7; // Default to Indonesia time (UTC+7)
 
     const parsedStartDate = startDate ? parseISO(startDate) : new Date();
 
@@ -150,7 +193,8 @@ export const generateScheduleComponents = async (req, res) => {
             startHour: 7,
             endHour: 15,
             slotDurationMinutes: 60,
-          }
+          },
+          tzOffset
         );
         result = { timeSlotsBySchedule: timeSlots };
         break;
