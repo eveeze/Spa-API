@@ -1,3 +1,4 @@
+// schedulerRepository.js - FIXED VERSION
 import prisma from "../config/db.js";
 import { addDays, setHours, setMinutes, parseISO, addMinutes } from "date-fns";
 
@@ -63,8 +64,8 @@ export const generateOperatingSchedules = async (
 export const generateTimeSlots = async (
   operatingSchedules,
   timeConfig = {
-    startHour: 7, // 7 AM
-    endHour: 15, // 3 PM
+    startHour: 7, // 7 AM WIB (00:00 UTC)
+    endHour: 15, // 3 PM WIB (08:00 UTC)
     slotDurationMinutes: 60, // 1 hour slots
   },
   timeZoneOffset = parseInt(process.env.TIMEZONE_OFFSET || "7") // Default to Indonesia time (UTC+7)
@@ -80,50 +81,52 @@ export const generateTimeSlots = async (
 
     const slotsToCreate = [];
     const scheduleDate = new Date(schedule.date);
-    let currentHour = timeConfig.startHour;
 
-    while (currentHour < timeConfig.endHour) {
-      // Create a new date based on the schedule date
-      const localDate = new Date(scheduleDate);
-      // Set the local time
-      localDate.setHours(currentHour, 0, 0, 0);
+    // FIXED: Define the proper UTC hour range that corresponds to WIB time range
+    // When WIB is 7:00-15:00 (UTC+7), UTC should be 00:00-08:00
+    const utcStartHour = timeConfig.startHour - timeZoneOffset; // 7 - 7 = 0
+    const utcEndHour = timeConfig.endHour - timeZoneOffset; // 15 - 7 = 8
 
-      // Convert local time to UTC for storage
-      // For UTC+7, this means subtracting 7 hours
-      const startTime = new Date(localDate);
-      startTime.setHours(startTime.getHours() - timeZoneOffset);
+    // Loop through each hour in the UTC range
+    for (let utcHour = utcStartHour; utcHour < utcEndHour; utcHour++) {
+      // Create the slot directly in UTC time
+      const slotDate = new Date(scheduleDate);
+      // Set the UTC hours directly
+      slotDate.setUTCHours(utcHour, 0, 0, 0);
+
+      const startTimeUTC = slotDate;
 
       // Calculate end time (add slot duration)
-      const endTime = new Date(startTime);
-      endTime.setMinutes(endTime.getMinutes() + timeConfig.slotDurationMinutes);
+      const endTimeUTC = new Date(startTimeUTC);
+      endTimeUTC.setMinutes(
+        endTimeUTC.getMinutes() + timeConfig.slotDurationMinutes
+      );
 
       // Check if time slot already exists
       const existingTimeSlot = await prisma.timeSlot.findFirst({
         where: {
           operatingScheduleId: schedule.id,
           startTime: {
-            gte: startTime,
-            lt: new Date(startTime.getTime() + 1000), // Within 1 second
+            gte: startTimeUTC,
+            lt: new Date(startTimeUTC.getTime() + 1000), // Within 1 second
           },
           endTime: {
-            gte: endTime,
-            lt: new Date(endTime.getTime() + 1000), // Within 1 second
+            gte: endTimeUTC,
+            lt: new Date(endTimeUTC.getTime() + 1000), // Within 1 second
           },
         },
       });
 
       if (!existingTimeSlot) {
         slotsToCreate.push({
-          startTime,
-          endTime,
+          startTime: startTimeUTC,
+          endTime: endTimeUTC,
         });
       }
-
-      currentHour++;
     }
 
     if (slotsToCreate.length > 0) {
-      const createdTimeSlots = await prisma.timeSlot.createMany({
+      await prisma.timeSlot.createMany({
         data: slotsToCreate.map((slot) => ({
           operatingScheduleId: schedule.id,
           startTime: slot.startTime,
@@ -242,8 +245,8 @@ export const generateFullSchedule = async (
   days = 7,
   holidayDates = [],
   timeConfig = {
-    startHour: 7,
-    endHour: 15,
+    startHour: 7, // 7 AM WIB (00:00 UTC)
+    endHour: 15, // 3 PM WIB (08:00 UTC)
     slotDurationMinutes: 60,
   },
   timeZoneOffset = parseInt(process.env.TIMEZONE_OFFSET || "7") // Default to Indonesia time (UTC+7)

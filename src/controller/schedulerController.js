@@ -1,3 +1,4 @@
+// schedulerController.js - FIXED VERSION
 import { parseISO, addDays } from "date-fns";
 import {
   generateOperatingSchedules,
@@ -36,16 +37,19 @@ export const generateSchedule = async (req, res) => {
     // Parse start date or use current date
     const parsedStartDate = startDate ? parseISO(startDate) : new Date();
 
+    // Use updated timeConfig with WIB time range (7-15) which will be converted to UTC (0-8)
+    const defaultTimeConfig = {
+      startHour: 7, // 7 AM WIB
+      endHour: 15, // 3 PM WIB
+      slotDurationMinutes: 60,
+    };
+
     // Generate full schedule with timezone support
     const result = await generateFullSchedule(
       parsedStartDate,
       parseInt(days),
       holidayDates,
-      timeConfig || {
-        startHour: 7,
-        endHour: 15,
-        slotDurationMinutes: 60,
-      },
+      timeConfig || defaultTimeConfig,
       tzOffset
     );
 
@@ -96,16 +100,19 @@ export const runScheduledGeneration = async (req, res) => {
       ? parseInt(process.env.TIMEZONE_OFFSET)
       : 7;
 
+    // Default time config for WIB time range 07:00-15:00
+    const defaultTimeConfig = {
+      startHour: 7, // 7 AM WIB
+      endHour: 15, // 3 PM WIB
+      slotDurationMinutes: 60,
+    };
+
     // Generate 7 days of schedules with proper timezone handling
     const result = await generateFullSchedule(
       startDate,
       7,
       [],
-      {
-        startHour: 7,
-        endHour: 15,
-        slotDurationMinutes: 60,
-      },
+      defaultTimeConfig,
       timeZoneOffset
     );
 
@@ -154,6 +161,13 @@ export const generateScheduleComponents = async (req, res) => {
 
     const parsedStartDate = startDate ? parseISO(startDate) : new Date();
 
+    // Default time config for WIB time range 07:00-15:00
+    const defaultTimeConfig = {
+      startHour: 7, // 7 AM WIB
+      endHour: 15, // 3 PM WIB
+      slotDurationMinutes: 60,
+    };
+
     let result = {};
 
     switch (component) {
@@ -189,11 +203,7 @@ export const generateScheduleComponents = async (req, res) => {
 
         const timeSlots = await generateTimeSlots(
           operatingSchedules.filter(Boolean),
-          timeConfig || {
-            startHour: 7,
-            endHour: 15,
-            slotDurationMinutes: 60,
-          },
+          timeConfig || defaultTimeConfig,
           tzOffset
         );
         result = { timeSlotsBySchedule: timeSlots };
