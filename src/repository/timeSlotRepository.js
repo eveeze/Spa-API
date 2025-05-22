@@ -2,6 +2,17 @@
 import prisma from "../config/db.js";
 
 /**
+ * Convert Indonesian time to UTC
+ * @param {string|Date} localTime - Local Indonesian time
+ * @returns {Date} UTC time
+ */
+const convertToUTC = (localTime) => {
+  const date = new Date(localTime);
+  // Indonesia is UTC+7, so subtract 7 hours to get UTC
+  return new Date(date.getTime() - 7 * 60 * 60 * 1000);
+};
+
+/**
  * Create a new time slot
  * @param {Object} data - Time slot data
  * @returns {Promise<Object>} Created time slot
@@ -10,8 +21,8 @@ const createTimeSlot = async (data) => {
   return await prisma.timeSlot.create({
     data: {
       operatingScheduleId: data.operatingScheduleId,
-      startTime: new Date(data.startTime),
-      endTime: new Date(data.endTime),
+      startTime: convertToUTC(data.startTime),
+      endTime: convertToUTC(data.endTime),
     },
     include: {
       operatingSchedule: true,
@@ -51,16 +62,16 @@ const getAllTimeSlots = async (filters = {}) => {
     };
   }
 
-  // Filter by time range
+  // Filter by time range - convert to UTC before querying
   if (startTime) {
     where.startTime = {
-      gte: new Date(startTime),
+      gte: convertToUTC(startTime),
     };
   }
 
   if (endTime) {
     where.endTime = {
-      lte: new Date(endTime),
+      lte: convertToUTC(endTime),
     };
   }
 
@@ -135,10 +146,11 @@ const getExistingTimeSlot = async (
   operatingScheduleId,
   startTime,
   endTime,
-  excludeId = null,
+  excludeId = null
 ) => {
-  const startDate = new Date(startTime);
-  const endDate = new Date(endTime);
+  // Convert to UTC before checking overlap
+  const startDateUTC = convertToUTC(startTime);
+  const endDateUTC = convertToUTC(endTime);
 
   // Build the where clause
   let where = {
@@ -146,8 +158,8 @@ const getExistingTimeSlot = async (
     OR: [
       // Modified overlap condition: slots overlap if one starts before the other ends AND ends after the other starts
       {
-        startTime: { lt: endDate },
-        endTime: { gt: startDate },
+        startTime: { lt: endDateUTC },
+        endTime: { gt: startDateUTC },
       },
     ],
   };
@@ -161,6 +173,7 @@ const getExistingTimeSlot = async (
     where,
   });
 };
+
 /**
  * Update time slot by ID
  * @param {String} id - Time slot ID
@@ -175,11 +188,11 @@ const updateTimeSlot = async (id, data) => {
   }
 
   if (data.startTime !== undefined) {
-    updateData.startTime = new Date(data.startTime);
+    updateData.startTime = convertToUTC(data.startTime);
   }
 
   if (data.endTime !== undefined) {
-    updateData.endTime = new Date(data.endTime);
+    updateData.endTime = convertToUTC(data.endTime);
   }
 
   return await prisma.timeSlot.update({
@@ -256,8 +269,8 @@ const getAvailableTimeSlots = async (date) => {
 const createMultipleTimeSlots = async (operatingScheduleId, timeSlots) => {
   const data = timeSlots.map((slot) => ({
     operatingScheduleId,
-    startTime: new Date(slot.startTime),
-    endTime: new Date(slot.endTime),
+    startTime: convertToUTC(slot.startTime),
+    endTime: convertToUTC(slot.endTime),
   }));
 
   return await prisma.$transaction(
@@ -267,8 +280,8 @@ const createMultipleTimeSlots = async (operatingScheduleId, timeSlots) => {
         include: {
           operatingSchedule: true,
         },
-      }),
-    ),
+      })
+    )
   );
 };
 

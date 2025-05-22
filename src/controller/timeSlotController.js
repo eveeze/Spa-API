@@ -13,25 +13,46 @@ import {
 import { getOperatingScheduleById } from "../repository/operatingScheduleRepository.js";
 
 /**
- * Check if a time falls on the same date as the operating schedule
- * @param {Date} time - The time to check
+ * Convert Indonesian time to UTC
+ * @param {string|Date} localTime - Local Indonesian time
+ * @returns {Date} UTC time
+ */
+const convertToUTC = (localTime) => {
+  const date = new Date(localTime);
+  // Indonesia is UTC+7, so subtract 7 hours to get UTC
+  return new Date(date.getTime() - 7 * 60 * 60 * 1000);
+};
+
+/**
+ * Convert UTC time to Indonesian time
+ * @param {Date} utcTime - UTC time
+ * @returns {Date} Indonesian local time
+ */
+const convertToIndonesianTime = (utcTime) => {
+  const date = new Date(utcTime);
+  // Indonesia is UTC+7, so add 7 hours to get local time
+  return new Date(date.getTime() + 7 * 60 * 60 * 1000);
+};
+
+/**
+ * Check if a time falls on the same date as the operating schedule (in Indonesian time)
+ * @param {Date} time - The time to check (in UTC)
  * @param {Date} scheduleDate - The operating schedule date
  * @returns {Boolean} True if the time is on the same date as the schedule
  */
-
 const isOnSameDate = (time, scheduleDate) => {
-  // Convert both dates to UTC first to standardize comparison
-  const timeDate = new Date(time);
+  // Convert UTC time to Indonesian time for comparison
+  const indonesianTime = convertToIndonesianTime(time);
   const scheduleDateObj = new Date(scheduleDate);
 
-  // Extract UTC date components
-  const timeYear = timeDate.getUTCFullYear();
-  const timeMonth = timeDate.getUTCMonth();
-  const timeDay = timeDate.getUTCDate();
+  // Extract date components in Indonesian timezone
+  const timeYear = indonesianTime.getFullYear();
+  const timeMonth = indonesianTime.getMonth();
+  const timeDay = indonesianTime.getDate();
 
-  const scheduleYear = scheduleDateObj.getUTCFullYear();
-  const scheduleMonth = scheduleDateObj.getUTCMonth();
-  const scheduleDay = scheduleDateObj.getUTCDate();
+  const scheduleYear = scheduleDateObj.getFullYear();
+  const scheduleMonth = scheduleDateObj.getMonth();
+  const scheduleDay = scheduleDateObj.getDate();
 
   return (
     timeYear === scheduleYear &&
@@ -39,6 +60,7 @@ const isOnSameDate = (time, scheduleDate) => {
     timeDay === scheduleDay
   );
 };
+
 /**
  * Create a new time slot
  */
@@ -91,10 +113,14 @@ const createNewTimeSlot = async (req, res) => {
       });
     }
 
+    // Convert to UTC for date comparison
+    const startDateUTC = convertToUTC(startDate);
+    const endDateUTC = convertToUTC(endDate);
+
     // Check if time slot date and the operating schedule date is same
     if (
-      !isOnSameDate(startDate, schedule.date) ||
-      !isOnSameDate(endDate, schedule.date)
+      !isOnSameDate(startDateUTC, schedule.date) ||
+      !isOnSameDate(endDateUTC, schedule.date)
     ) {
       return res.status(400).json({
         success: false,
@@ -106,7 +132,7 @@ const createNewTimeSlot = async (req, res) => {
     const existingTimeSlot = await getExistingTimeSlot(
       operatingScheduleId,
       startTime,
-      endTime,
+      endTime
     );
     if (existingTimeSlot) {
       return res.status(400).json({
@@ -156,7 +182,7 @@ const updateTimeSlotHandler = async (req, res) => {
     // Prepare update data
     const updateData = {};
     let scheduleToCheck = await getOperatingScheduleById(
-      existingTimeSlot.operatingScheduleId,
+      existingTimeSlot.operatingScheduleId
     );
 
     // Check if operating schedule is changing
@@ -204,9 +230,16 @@ const updateTimeSlotHandler = async (req, res) => {
       });
     }
 
-    // Use existing times if not provided
-    const effectiveStartTime = newStartTime || existingTimeSlot.startTime;
-    const effectiveEndTime = newEndTime || existingTimeSlot.endTime;
+    // Use existing times if not provided (convert existing UTC times back to local for comparison)
+    const existingStartTimeLocal = convertToIndonesianTime(
+      existingTimeSlot.startTime
+    );
+    const existingEndTimeLocal = convertToIndonesianTime(
+      existingTimeSlot.endTime
+    );
+
+    const effectiveStartTime = newStartTime || existingStartTimeLocal;
+    const effectiveEndTime = newEndTime || existingEndTimeLocal;
 
     // Check start time is before end time
     if (effectiveStartTime >= effectiveEndTime) {
@@ -216,10 +249,14 @@ const updateTimeSlotHandler = async (req, res) => {
       });
     }
 
+    // Convert to UTC for date comparison
+    const effectiveStartTimeUTC = convertToUTC(effectiveStartTime);
+    const effectiveEndTimeUTC = convertToUTC(effectiveEndTime);
+
     // Check if time slot date and the operating schedule date is same
     if (
-      !isOnSameDate(effectiveStartTime, scheduleToCheck.date) ||
-      !isOnSameDate(effectiveEndTime, scheduleToCheck.date)
+      !isOnSameDate(effectiveStartTimeUTC, scheduleToCheck.date) ||
+      !isOnSameDate(effectiveEndTimeUTC, scheduleToCheck.date)
     ) {
       return res.status(400).json({
         success: false,
@@ -235,7 +272,7 @@ const updateTimeSlotHandler = async (req, res) => {
         scheduleIdToCheck,
         effectiveStartTime,
         effectiveEndTime,
-        id, // Exclude the current time slot from the check
+        id // Exclude the current time slot from the check
       );
 
       if (existingSlot) {
@@ -252,7 +289,7 @@ const updateTimeSlotHandler = async (req, res) => {
 
     // Check if there are any sessions with reservations
     const hasBookedSessions = existingTimeSlot.sessions.some(
-      (session) => session.isBooked || session.reservation !== null,
+      (session) => session.isBooked || session.reservation !== null
     );
 
     if (hasBookedSessions && (startTime || endTime)) {
@@ -342,15 +379,20 @@ const createMultipleTimeSlotsHandler = async (req, res) => {
         });
       }
 
-      // Check if time slot date and the operating schedule date is same
+      // Convert to UTC for date comparison
+      const startDateUTC = convertToUTC(startDate);
+      const endDateUTC = convertToUTC(endDate);
 
+      // Check if time slot date and the operating schedule date is same
       if (
-        !isOnSameDate(startDate, schedule.date) ||
-        !isOnSameDate(endDate, schedule.date)
+        !isOnSameDate(startDateUTC, schedule.date) ||
+        !isOnSameDate(endDateUTC, schedule.date)
       ) {
         return res.status(400).json({
           success: false,
-          message: `Time slot (${startDate.toISOString()} - ${endDate.toISOString()}) must be on the same date as the operating schedule (${schedule.date.toISOString().split("T")[0]})`,
+          message: `Time slot (${startDate.toISOString()} - ${endDate.toISOString()}) must be on the same date as the operating schedule (${
+            schedule.date.toISOString().split("T")[0]
+          })`,
         });
       }
 
@@ -358,7 +400,7 @@ const createMultipleTimeSlotsHandler = async (req, res) => {
       const existingTimeSlot = await getExistingTimeSlot(
         operatingScheduleId,
         startDate,
-        endDate,
+        endDate
       );
       if (existingTimeSlot) {
         return res.status(400).json({
@@ -386,7 +428,7 @@ const createMultipleTimeSlotsHandler = async (req, res) => {
     // Create the time slots
     const createdTimeSlots = await createMultipleTimeSlots(
       operatingScheduleId,
-      timeSlots,
+      timeSlots
     );
 
     res.status(201).json({
@@ -499,7 +541,7 @@ const deleteTimeSlotHandler = async (req, res) => {
 
     // Check if there are any sessions with reservations
     const hasBookedSessions = timeSlot.sessions.some(
-      (session) => session.isBooked || session.reservation !== null,
+      (session) => session.isBooked || session.reservation !== null
     );
 
     if (hasBookedSessions) {
