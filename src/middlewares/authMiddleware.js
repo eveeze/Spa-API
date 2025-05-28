@@ -137,3 +137,138 @@ export const customerAuth = async (req, res, next) => {
     });
   }
 };
+export const captureRawBodyForCallback = (req, res, next) => {
+  if (req.originalUrl.includes("/callback")) {
+    let data = "";
+    req.setEncoding("utf8");
+
+    req.on("data", (chunk) => {
+      data += chunk;
+    });
+
+    req.on("end", () => {
+      req.rawBody = data;
+
+      // Parse JSON jika belum di-parse
+      if (!req.body && data) {
+        try {
+          req.body = JSON.parse(data);
+        } catch (error) {
+          console.error("[CALLBACK MIDDLEWARE] JSON parse error:", error);
+          return res.status(400).json({
+            success: false,
+            message: "Invalid JSON format",
+          });
+        }
+      }
+
+      next();
+    });
+
+    req.on("error", (error) => {
+      console.error("[CALLBACK MIDDLEWARE] Request error:", error);
+      res.status(400).json({
+        success: false,
+        message: "Request processing error",
+      });
+    });
+  } else {
+    next();
+  }
+};
+
+export const callbackMiddleware = (req, res, next) => {
+  // Log semua request untuk debugging
+  console.log("[CALLBACK MIDDLEWARE] Method:", req.method);
+  console.log("[CALLBACK MIDDLEWARE] URL:", req.originalUrl);
+  console.log(
+    "[CALLBACK MIDDLEWARE] Headers:",
+    JSON.stringify(req.headers, null, 2)
+  );
+  console.log("[CALLBACK MIDDLEWARE] Body:", JSON.stringify(req.body, null, 2));
+
+  // Set CORS headers jika diperlukan
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Content-Type, X-Callback-Event, X-Callback-Signature"
+  );
+
+  // Handle OPTIONS request for CORS preflight
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  // Pastikan method adalah POST untuk callback
+  if (req.method !== "POST") {
+    console.warn(`[CALLBACK MIDDLEWARE] Invalid method: ${req.method}`);
+    return res.status(405).json({
+      success: false,
+      message: "Method not allowed",
+    });
+  }
+
+  // Pastikan content type adalah JSON
+  if (
+    req.headers["content-type"] &&
+    !req.headers["content-type"].includes("application/json")
+  ) {
+    console.warn(
+      "[CALLBACK MIDDLEWARE] Non-JSON content type:",
+      req.headers["content-type"]
+    );
+  }
+
+  // PERBAIKAN: Validasi callback signature dari header jika ada
+  if (
+    process.env.NODE_ENV === "production" &&
+    req.headers["x-callback-signature"]
+  ) {
+    const receivedSignature = req.headers["x-callback-signature"];
+
+    // Validasi signature menggunakan data dari body
+    if (req.body && typeof req.body === "object") {
+      const { merchant_ref, reference, status } = req.body;
+
+      if (merchant_ref && reference && status) {
+        const calculatedSignature = crypto
+          .createHmac("sha256", process.env.TRIPAY_PRIVATE_KEY)
+          .update(`${merchant_ref}${reference}${status}`)
+          .digest("hex");
+
+        if (receivedSignature !== calculatedSignature) {
+          console.error(
+            "[CALLBACK MIDDLEWARE] Invalid signature from header:",
+            {
+              received: receivedSignature,
+              calculated: calculatedSignature,
+              reference,
+            }
+          );
+
+          return res.status(400).json({
+            success: false,
+            message: "Invalid callback signature",
+          });
+        }
+
+        console.log(
+          "[CALLBACK MIDDLEWARE] Valid signature verified from header"
+        );
+      }
+    }
+  }
+
+  // Validasi callback event type
+  if (
+    req.headers["x-callback-event"] &&
+    req.headers["x-callback-event"] !== "payment_status"
+  ) {
+    console.warn(
+      `[CALLBACK MIDDLEWARE] Unknown callback event: ${req.headers["x-callback-event"]}`
+    );
+  }
+
+  next();
+};

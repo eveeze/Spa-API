@@ -3,14 +3,22 @@ import axios from "axios";
 import crypto from "crypto";
 
 // Tripay API configuration
+const TRIPAY_MODE = process.env.TRIPAY_MODE || "sandbox";
 const TRIPAY_API_KEY = process.env.TRIPAY_API_KEY;
 const TRIPAY_PRIVATE_KEY = process.env.TRIPAY_PRIVATE_KEY;
 const TRIPAY_MERCHANT_CODE = process.env.TRIPAY_MERCHANT_CODE;
-const TRIPAY_API_URL = process.env.TRIPAY_API_URL || "https://tripay.co.id/api";
+
+// API URL based on mode
+const TRIPAY_API_URL =
+  TRIPAY_MODE === "production"
+    ? process.env.TRIPAY_API_URL_PRODUCTION || "https://tripay.co.id/api"
+    : process.env.TRIPAY_API_URL || "https://tripay.co.id/api-sandbox";
+
 const CALLBACK_URL =
-  process.env.CALLBACK_URL || "https://yourdomain.com/api/payment/callback";
+  process.env.CALLBACK_URL ||
+  "http://localhost:3000/api/reservations/payment/callback";
 const RETURN_URL =
-  process.env.RETURN_URL || "https://yourdomain.com/payment/success";
+  process.env.RETURN_URL || "http://localhost:3000/payment/success";
 
 // Validate required environment variables
 const validateConfig = () => {
@@ -26,9 +34,12 @@ const validateConfig = () => {
 
   if (missingVars.length > 0) {
     throw new Error(
-      `Missing required environment variables: ${missingVars.join(", ")}`,
+      `Missing required environment variables: ${missingVars.join(", ")}`
     );
   }
+
+  console.log(`[TRIPAY] Running in ${TRIPAY_MODE} mode`);
+  console.log(`[TRIPAY] API URL: ${TRIPAY_API_URL}`);
 };
 
 /**
@@ -47,20 +58,21 @@ export const getPaymentChannels = async (retries = 2) => {
           Authorization: `Bearer ${TRIPAY_API_KEY}`,
         },
         timeout: 10000, // 10 second timeout
-      },
+      }
     );
 
     if (!response.data.success) {
       throw new Error(
-        response.data.message || "Failed to get payment channels",
+        response.data.message || "Failed to get payment channels"
       );
     }
 
+    console.log(`[TRIPAY] Found ${response.data.data.length} payment channels`);
     return response.data.data;
   } catch (error) {
     console.error(
       "[TRIPAY ERROR] Get payment channels:",
-      error.response?.data || error.message,
+      error.response?.data || error.message
     );
 
     // Implement retry logic
@@ -74,7 +86,7 @@ export const getPaymentChannels = async (retries = 2) => {
 
     throw new Error(
       "Failed to get payment channels: " +
-        (error.response?.data?.message || error.message),
+        (error.response?.data?.message || error.message)
     );
   }
 };
@@ -91,8 +103,10 @@ const calculateSignature = (merchantCode, merchantRef, amount) => {
     throw new Error("Missing required parameters for signature calculation");
   }
 
-  const amountStr = String(amount); // Ensure amount is a string for signature
+  const amountStr = String(amount);
   const signatureString = `${merchantCode}${merchantRef}${amountStr}`;
+
+  console.log(`[TRIPAY] Signature string: ${signatureString}`);
 
   return crypto
     .createHmac("sha256", TRIPAY_PRIVATE_KEY)
@@ -103,13 +117,6 @@ const calculateSignature = (merchantCode, merchantRef, amount) => {
 /**
  * Create a payment transaction in Tripay with validation
  * @param {Object} paymentData - Payment data
- * @param {String} paymentData.reservationId - Reservation ID
- * @param {String} paymentData.customerName - Customer name
- * @param {String} paymentData.customerEmail - Customer email
- * @param {String} paymentData.customerPhone - Customer phone number
- * @param {String} paymentData.paymentMethod - Payment method code
- * @param {Number} paymentData.amount - Transaction amount
- * @param {String} paymentData.serviceName - Service name
  * @returns {Promise<Object>} Transaction details from Tripay
  */
 export const createTransaction = async (paymentData) => {
@@ -130,7 +137,7 @@ export const createTransaction = async (paymentData) => {
 
   if (missingFields.length > 0) {
     throw new Error(
-      `Missing required payment data: ${missingFields.join(", ")}`,
+      `Missing required payment data: ${missingFields.join(", ")}`
     );
   }
 
@@ -155,8 +162,12 @@ export const createTransaction = async (paymentData) => {
     const signature = calculateSignature(
       TRIPAY_MERCHANT_CODE,
       merchantRef,
-      formattedAmount,
+      formattedAmount
     );
+
+    // FIXED: Calculate expiry time properly - current time + 24 hours in seconds
+    const currentTime = Math.floor(Date.now() / 1000); // Current timestamp in seconds
+    const expiryTime = currentTime + 24 * 60 * 60; // Add 24 hours in seconds
 
     const payload = {
       method: paymentMethod,
@@ -174,9 +185,18 @@ export const createTransaction = async (paymentData) => {
       ],
       callback_url: CALLBACK_URL,
       return_url: RETURN_URL,
-      expired_time: 24 * 60 * 60, // 24 hours in seconds
+      expired_time: expiryTime, // FIXED: Now using timestamp instead of duration
       signature: signature,
     };
+
+    console.log(`[TRIPAY] Creating transaction for ${merchantRef}`);
+    console.log(`[TRIPAY] Amount: ${formattedAmount}`);
+    console.log(`[TRIPAY] Payment method: ${paymentMethod}`);
+    console.log(
+      `[TRIPAY] Expiry time: ${expiryTime} (${new Date(
+        expiryTime * 1000
+      ).toISOString()})`
+    );
 
     const response = await axios.post(
       `${TRIPAY_API_URL}/transaction/create`,
@@ -184,20 +204,24 @@ export const createTransaction = async (paymentData) => {
       {
         headers: {
           Authorization: `Bearer ${TRIPAY_API_KEY}`,
+          "Content-Type": "application/json",
         },
         timeout: 15000, // 15 second timeout for transaction creation
-      },
+      }
     );
 
     if (!response.data.success) {
       throw new Error(response.data.message || "Transaction creation failed");
     }
 
+    console.log(
+      `[TRIPAY] Transaction created successfully: ${response.data.data.reference}`
+    );
     return response.data.data;
   } catch (error) {
     console.error(
       "[TRIPAY ERROR] Create transaction:",
-      error.response?.data || error.message,
+      error.response?.data || error.message
     );
 
     // Enhanced error message with more details
@@ -208,7 +232,7 @@ export const createTransaction = async (paymentData) => {
       : "";
 
     throw new Error(
-      `Failed to create payment transaction: ${errorMessage} ${errorDetail}`,
+      `Failed to create payment transaction: ${errorMessage} ${errorDetail}`
     );
   }
 };
@@ -233,12 +257,12 @@ export const getTransactionDetails = async (reference) => {
           Authorization: `Bearer ${TRIPAY_API_KEY}`,
         },
         timeout: 10000, // 10 second timeout
-      },
+      }
     );
 
     if (!response.data.success) {
       throw new Error(
-        response.data.message || "Failed to get transaction details",
+        response.data.message || "Failed to get transaction details"
       );
     }
 
@@ -246,11 +270,11 @@ export const getTransactionDetails = async (reference) => {
   } catch (error) {
     console.error(
       "[TRIPAY ERROR] Get transaction details:",
-      error.response?.data || error.message,
+      error.response?.data || error.message
     );
     throw new Error(
       "Failed to get transaction details: " +
-        (error.response?.data?.message || error.message),
+        (error.response?.data?.message || error.message)
     );
   }
 };
@@ -264,33 +288,120 @@ export const verifyCallbackSignature = (callbackData) => {
   try {
     validateConfig();
 
+    // PERBAIKAN: Ambil signature dari callbackData atau dari field signature langsung
     const { merchant_ref, reference, status, signature } = callbackData;
 
-    // Validate required fields are present
-    if (!merchant_ref || !reference || !status || !signature) {
+    // Validasi required fields are present
+    if (!merchant_ref || !reference || !status) {
       console.error(
-        "[TRIPAY CALLBACK] Missing required fields for signature verification",
+        "[TRIPAY CALLBACK] Missing required fields for signature verification:",
+        {
+          merchant_ref: !!merchant_ref,
+          reference: !!reference,
+          status: !!status,
+        }
       );
       return false;
     }
 
+    // PERBAIKAN: Jika tidak ada signature di body, cek dari header (akan dihandle di middleware)
+    if (!signature) {
+      console.warn("[TRIPAY CALLBACK] No signature in callback data");
+      return false;
+    }
+
+    // Generate expected signature
+    const signatureString = `${merchant_ref}${reference}${status}`;
     const validSignature = crypto
       .createHmac("sha256", TRIPAY_PRIVATE_KEY)
-      .update(`${merchant_ref}${reference}${status}`)
+      .update(signatureString)
       .digest("hex");
 
     const isValid = signature === validSignature;
 
     // Log verification attempt for security audit
+    console.log(`[TRIPAY CALLBACK] Signature verification for ${reference}:`, {
+      merchant_ref,
+      reference,
+      status,
+      signatureString,
+      receivedSignature: signature,
+      calculatedSignature: validSignature,
+      isValid,
+    });
+
     if (!isValid) {
       console.error(
-        `[TRIPAY CALLBACK] Invalid signature detected for transaction ${reference}`,
+        `[TRIPAY CALLBACK] Invalid signature detected for transaction ${reference}:`,
+        {
+          expected: validSignature,
+          received: signature,
+          signatureData: signatureString,
+        }
       );
     }
 
     return isValid;
   } catch (error) {
     console.error("[TRIPAY ERROR] Verify callback signature:", error.message);
+    return false;
+  }
+};
+
+// Test function untuk development
+export const testTripayConnection = async () => {
+  try {
+    console.log("[TRIPAY TEST] Testing connection...");
+    const channels = await getPaymentChannels();
+    console.log("[TRIPAY TEST] Connection successful!");
+    console.log(
+      "[TRIPAY TEST] Available payment methods:",
+      channels.map((c) => c.name)
+    );
+    return true;
+  } catch (error) {
+    console.error("[TRIPAY TEST] Connection failed:", error.message);
+    return false;
+  }
+};
+
+export const verifyCallbackSignatureFromHeader = (
+  headerSignature,
+  callbackData
+) => {
+  try {
+    validateConfig();
+
+    const { merchant_ref, reference, status } = callbackData;
+
+    if (!merchant_ref || !reference || !status || !headerSignature) {
+      console.error(
+        "[TRIPAY CALLBACK] Missing data for header signature verification"
+      );
+      return false;
+    }
+
+    const signatureString = `${merchant_ref}${reference}${status}`;
+    const validSignature = crypto
+      .createHmac("sha256", TRIPAY_PRIVATE_KEY)
+      .update(signatureString)
+      .digest("hex");
+
+    const isValid = headerSignature === validSignature;
+
+    console.log(
+      `[TRIPAY CALLBACK] Header signature verification for ${reference}:`,
+      {
+        signatureString,
+        headerSignature,
+        calculatedSignature: validSignature,
+        isValid,
+      }
+    );
+
+    return isValid;
+  } catch (error) {
+    console.error("[TRIPAY ERROR] Verify header signature:", error.message);
     return false;
   }
 };

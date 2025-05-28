@@ -120,6 +120,7 @@ export const getSessionById = async (id) => {
         },
       },
       staff: true,
+      //service: true,
       reservation: true,
     },
   });

@@ -11,34 +11,75 @@ import {
   createManualPayment,
   verifyManualPayment,
   getAnalytics,
+  createManualReservation,
+  updateManualReservationPayment,
+  uploadManualPaymentProof,
+  testTripayIntegration,
 } from "../controller/reservationController.js";
-import { customerAuth, ownerAuth } from "../middlewares/authMiddleware.js";
+import {
+  customerAuth,
+  ownerAuth,
+  callbackMiddleware,
+  captureRawBodyForCallback,
+} from "../middlewares/authMiddleware.js";
 import { paymentProofUploadMiddleware } from "../middlewares/imageUploadMiddleware.js";
 
 const router = express.Router();
 
-// Public routes
-router.post("/payment/callback", handlePaymentCallback); // Tripay webhook
+// BARU: Test route untuk development
+if (process.env.NODE_ENV === "development") {
+  router.get("/test/tripay", ownerAuth, testTripayIntegration);
+}
 
-// Customer routes
-router.post("/", customerAuth, createNewReservation);
+// Public routes
+router.post(
+  "/payment/callback",
+  captureRawBodyForCallback, // Handle raw body jika diperlukan
+  callbackMiddleware, // Validasi dan logging
+  handlePaymentCallback // Handler utama
+);
+// Customer routes - specific routes first
 router.get("/customer", customerAuth, getFilteredReservations);
-router.get("/customer/:id", customerAuth, getReservation);
 router.get("/payment-methods", customerAuth, getAvailablePaymentMethods);
+router.post("/", customerAuth, createNewReservation);
+router.get("/customer/:id", customerAuth, getReservation);
 router.get("/payment/:reservationId", customerAuth, getPaymentDetails);
 router.post(
   "/payment/:reservationId/proof",
   customerAuth,
   paymentProofUploadMiddleware,
-  createManualPayment,
+  createManualPayment
 );
 
-// Owner routes
+// Owner routes - specific routes first, then dynamic routes
 router.get("/owner", ownerAuth, getFilteredReservations);
+router.get("/owner/payment-methods", ownerAuth, getAvailablePaymentMethods); // MOVED UP
+router.get("/analytics", ownerAuth, getAnalytics); // MOVED UP
+
+// Manual booking routes (untuk owner) - specific routes
+router.post(
+  "/owner/manual",
+  ownerAuth,
+  paymentProofUploadMiddleware,
+  createManualReservation
+);
+
+// Owner routes with parameters - these should come after specific routes
 router.get("/owner/:id", ownerAuth, getReservation);
 router.put("/owner/:id/status", ownerAuth, updateReservation);
 router.get("/owner/payment/:reservationId", ownerAuth, getPaymentDetails);
 router.put("/owner/payment/:paymentId/verify", ownerAuth, verifyManualPayment);
-router.get("/analytics", ownerAuth, getAnalytics);
+
+router.put(
+  "/owner/manual/:reservationId/payment",
+  ownerAuth,
+  updateManualReservationPayment
+);
+router.post(
+  "/owner/manual/:reservationId/payment-proof",
+  ownerAuth,
+  paymentProofUploadMiddleware,
+  uploadManualPaymentProof
+);
 
 export default router;

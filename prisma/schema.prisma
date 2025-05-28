@@ -34,6 +34,9 @@ model Customer {
   verificationOtpCreatedAt DateTime?
   resetPasswordOtp         String?
   resetOtpCreatedAt        DateTime?
+  isManualCustomer         Boolean       @default(false) // BARU: Untuk menandai customer manual
+  address                  String?       // BARU: Alamat customer
+  instagramHandle          String?       // BARU: Handle Instagram
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
   reservations             Reservation[]
@@ -183,6 +186,8 @@ enum PaymentMethod {
   QRIS
   E_WALLET
   RETAIL_OUTLET
+  CASH
+  MANUAL
 }
 
 // Tipe reservasi
@@ -204,6 +209,7 @@ model Reservation {
   sessionId       String            @unique
   session         Session           @relation(fields: [sessionId], references: [id])
   notes           String? // Catatan khusus untuk reservasi
+  parentNames     String?           // NEW: Parent names for manual reservations
   babyName        String
   babyAge         Int // Umur bayi dalam bulan
   priceTierId     String? // ID price tier jika menggunakan layanan dengan price tiers
@@ -226,11 +232,16 @@ model Payment {
   transactionId     String? // ID transaksi dari Tripay
   tripayToken       String? // Token untuk Tripay
   paymentDate       DateTime?
+  notes           String? // Catatan untuk pembayaran 
   expiryDate        DateTime // Batas waktu pembayaran
   paymentProof      String? // URL bukti pembayaran (jika manual)
   tripayPaymentUrl  String? // URL pembayaran dari Tripay
   tripayInstructions Json? // Instruksi pembayaran dari Tripay
   tripayResponse    Json? // Respons lengkap dari Tripay
+  merchantFee       Float?   // Biaya merchant
+  customerFee       Float?   // Biaya customer
+  qrCodeUrl         String?  // URL QR Code
+  paymentCodes      Json?    // Kode pembayaran (VA Number, dll)
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 }
