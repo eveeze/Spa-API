@@ -35,8 +35,8 @@ model Customer {
   resetPasswordOtp         String?
   resetOtpCreatedAt        DateTime?
   isManualCustomer         Boolean       @default(false) // BARU: Untuk menandai customer manual
-  address                  String?       // BARU: Alamat customer
-  instagramHandle          String?       // BARU: Handle Instagram
+  address                  String? // BARU: Alamat customer
+  instagramHandle          String? // BARU: Handle Instagram
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
   reservations             Reservation[]
@@ -209,7 +209,7 @@ model Reservation {
   sessionId       String            @unique
   session         Session           @relation(fields: [sessionId], references: [id])
   notes           String? // Catatan khusus untuk reservasi
-  parentNames     String?           // NEW: Parent names for manual reservations
+  parentNames     String? // NEW: Parent names for manual reservations
   babyName        String
   babyAge         Int // Umur bayi dalam bulan
   priceTierId     String? // ID price tier jika menggunakan layanan dengan price tiers
@@ -223,29 +223,28 @@ model Reservation {
 
 // Pembayaran
 model Payment {
-  id                String        @id @default(uuid())
-  reservationId     String        @unique
-  reservation       Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
-  amount            Float
-  paymentMethod     PaymentMethod
-  paymentStatus     PaymentStatus @default(PENDING)
-  transactionId     String? // ID transaksi dari Tripay
-  tripayToken       String? // Token untuk Tripay
-  paymentDate       DateTime?
-  notes           String? // Catatan untuk pembayaran 
-  expiryDate        DateTime // Batas waktu pembayaran
-  paymentProof      String? // URL bukti pembayaran (jika manual)
-  tripayPaymentUrl  String? // URL pembayaran dari Tripay
+  id                 String        @id @default(uuid())
+  reservationId      String        @unique
+  reservation        Reservation   @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  amount             Float
+  paymentMethod      PaymentMethod
+  paymentStatus      PaymentStatus @default(PENDING)
+  transactionId      String? // ID transaksi dari Tripay
+  tripayToken        String? // Token untuk Tripay
+  paymentDate        DateTime?
+  notes              String? // Catatan untuk pembayaran 
+  expiryDate         DateTime // Batas waktu pembayaran
+  paymentProof       String? // URL bukti pembayaran (jika manual)
+  tripayPaymentUrl   String? // URL pembayaran dari Tripay
   tripayInstructions Json? // Instruksi pembayaran dari Tripay
-  tripayResponse    Json? // Respons lengkap dari Tripay
-  merchantFee       Float?   // Biaya merchant
-  customerFee       Float?   // Biaya customer
-  qrCodeUrl         String?  // URL QR Code
-  paymentCodes      Json?    // Kode pembayaran (VA Number, dll)
-  createdAt         DateTime      @default(now())
-  updatedAt         DateTime      @updatedAt
+  tripayResponse     Json? // Respons lengkap dari Tripay
+  merchantFee        Float? // Biaya merchant
+  customerFee        Float? // Biaya customer
+  qrCodeUrl          String? // URL QR Code
+  paymentCodes       Json? // Kode pembayaran (VA Number, dll)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 }
-
 
 // Analitik untuk owner
 model Analytics {

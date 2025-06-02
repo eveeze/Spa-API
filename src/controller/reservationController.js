@@ -1071,9 +1071,9 @@ export const getPaymentDetails = async (req, res) => {
           expiryDate: payment.expiryDate,
           paymentProof: payment.paymentProof,
           paymentUrl: payment.tripayPaymentUrl,
-          merchantFee: payment.merchantFee || null, // BARU: Merchant fee
-          qrCode: payment.tripayResponse?.qr_string || null, // BARU: QR code
-          instructions: payment.tripayInstructions || {}, // BARU: Payment instructions
+          merchantFee: payment.merchantFee || null,
+          qrCode: payment.tripayResponse?.qr_string || null,
+          instructions: payment.tripayInstructions || {},
           createdAt: payment.createdAt,
           updatedAt: payment.updatedAt,
         },
@@ -1449,6 +1449,18 @@ export const createManualReservation = async (req, res) => {
       reservationStatus,
     });
 
+    if (notes && notes.length > 500) {
+      throw new Error("Notes cannot exceed 500 characters");
+    }
+
+    const formattedNotes = [
+      `Booking Manual Owner`,
+      ...(parentNames ? [`Nama Orang Tua: ${parentNames}`] : []),
+      ...(customerAddress ? [`Alamat: ${customerAddress}`] : []),
+      ...(customerInstagram ? [`Instagram: ${customerInstagram}`] : []),
+      ...(notes ? [notes] : []),
+    ];
+
     // PREPARE RESERVATION DATA
     const reservationData = {
       customerId: customer.id,
@@ -1459,15 +1471,7 @@ export const createManualReservation = async (req, res) => {
       babyAge: parseInt(babyAge), // Ensure it's a number
       priceTierId: priceTierId || null,
       parentNames: parentNames?.trim() || null, // Store parent names in the field
-      notes: [
-        `Manual booking`,
-        parentNames ? `Parent: ${parentNames}` : null,
-        customerAddress ? `Address: ${customerAddress}` : null,
-        customerInstagram ? `Instagram: ${customerInstagram}` : null,
-        notes || null,
-      ]
-        .filter(Boolean)
-        .join("\n"),
+      notes: formattedNotes.join("\n") || null,
       reservationType: "MANUAL",
       createdByOwner: true,
       status: reservationStatus, // Use the determined status

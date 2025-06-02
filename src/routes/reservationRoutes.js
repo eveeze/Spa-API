@@ -34,11 +34,11 @@ if (process.env.NODE_ENV === "development") {
 // Public routes
 router.post(
   "/payment/callback",
-  captureRawBodyForCallback, // Handle raw body jika diperlukan
-  callbackMiddleware, // Validasi dan logging
-  handlePaymentCallback // Handler utama
+  captureRawBodyForCallback,
+  callbackMiddleware,
+  handlePaymentCallback
 );
-// Customer routes - specific routes first
+// Customer routes
 router.get("/customer", customerAuth, getFilteredReservations);
 router.get("/payment-methods", customerAuth, getAvailablePaymentMethods);
 router.post("/", customerAuth, createNewReservation);
@@ -51,7 +51,7 @@ router.post(
   createManualPayment
 );
 
-// Owner routes - specific routes first, then dynamic routes
+// Owner routes
 router.get("/owner", ownerAuth, getFilteredReservations);
 router.get("/owner/payment-methods", ownerAuth, getAvailablePaymentMethods); // MOVED UP
 router.get("/analytics", ownerAuth, getAnalytics); // MOVED UP
@@ -64,7 +64,7 @@ router.post(
   createManualReservation
 );
 
-// Owner routes with parameters - these should come after specific routes
+// Owner routes
 router.get("/owner/:id", ownerAuth, getReservation);
 router.put("/owner/:id/status", ownerAuth, updateReservation);
 router.get("/owner/payment/:reservationId", ownerAuth, getPaymentDetails);
