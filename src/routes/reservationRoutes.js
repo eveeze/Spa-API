@@ -15,6 +15,8 @@ import {
   updateManualReservationPayment,
   uploadManualPaymentProof,
   testTripayIntegration,
+  getUpcomingReservationsHandler,
+  getUpcomingReservationsForDay,
 } from "../controller/reservationController.js";
 import {
   customerAuth,
@@ -65,7 +67,14 @@ router.post(
 );
 
 // Owner routes
+router.get("/owner/upcoming", ownerAuth, getUpcomingReservationsHandler); // New route for owner's upcoming reservations (can be filtered by staffId via query param)
+
 router.get("/owner/:id", ownerAuth, getReservation);
+router.get(
+  "/owner/dashboard/upcoming-by-day",
+  ownerAuth,
+  getUpcomingReservationsForDay
+);
 router.put("/owner/:id/status", ownerAuth, updateReservation);
 router.get("/owner/payment/:reservationId", ownerAuth, getPaymentDetails);
 router.put("/owner/payment/:paymentId/verify", ownerAuth, verifyManualPayment);

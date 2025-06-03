@@ -11,6 +11,7 @@ import {
   getReservationAnalytics,
   getPaymentById,
   getExpiredPendingPayments,
+  getUpcomingReservations,
 } from "../repository/reservationRepository.js";
 import {
   getSessionById,
@@ -28,7 +29,109 @@ import { getServiceById } from "../repository/serviceRepository.js";
 import { addHours } from "date-fns";
 import * as notificationService from "../services/notificationService.js";
 import paymentScheduler from "../config/paymentScheduler.js";
+/**
+ * Get upcoming reservations
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const getUpcomingReservationsHandler = async (req, res) => {
+  try {
+    const { page = 1, limit = 10 } = req.query;
 
+    const options = {
+      page: parseInt(page),
+      limit: parseInt(limit),
+    };
+
+    // If customer is making request, filter by their ID
+    if (req.customer) {
+      options.customerId = req.customer.id;
+    }
+
+    // If owner is making request and staffId is provided, filter by staff
+    // Owners can also see all upcoming reservations if staffId is not provided.
+    if (req.owner && req.query.staffId) {
+      options.staffId = req.query.staffId;
+    }
+
+    const result = await getUpcomingReservations(options);
+
+    return res.status(200).json({
+      success: true,
+      message: "Upcoming reservations retrieved successfully",
+      data: result.data,
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    console.error("[GET UPCOMING RESERVATIONS ERROR]:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to retrieve upcoming reservations",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
+/**
+ * Get upcoming reservations for a specific day for the dashboard
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const getUpcomingReservationsForDay = async (req, res) => {
+  try {
+    const { date, page = 1, limit = 10 } = req.query;
+
+    if (!date) {
+      return res.status(400).json({
+        success: false,
+        message: "Date query parameter is required (YYYY-MM-DD)",
+      });
+    }
+
+    const targetDate = new Date(date);
+    if (isNaN(targetDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid date format. Please use YYYY-MM-DD.",
+      });
+    }
+
+    const startDate = new Date(targetDate);
+    startDate.setUTCHours(0, 0, 0, 0); // Start of the day in UTC
+
+    const endDate = new Date(targetDate);
+    endDate.setUTCHours(23, 59, 59, 999); // End of the day in UTC
+
+    // Define statuses for "upcoming" that are confirmed or in progress
+    // 'PENDING' could be included if manual bookings with cash payment are considered "soft booked"
+    const upcomingStatuses = ["CONFIRMED", "IN_PROGRESS"];
+
+    const options = {
+      status: upcomingStatuses,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
+      page: parseInt(page),
+      limit: parseInt(limit),
+      orderBy: "sessionTime:asc", // Sort by the appointment time
+    };
+
+    const result = await getReservations(options); // Using the existing getReservations function
+
+    return res.status(200).json({
+      success: true,
+      message: `Upcoming reservations for ${date} retrieved successfully`,
+      data: result.data,
+      pagination: result.pagination,
+    });
+  } catch (error) {
+    console.error("[GET UPCOMING RESERVATIONS FOR DAY ERROR]:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to retrieve upcoming reservations",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
 /**
  * Create a new reservation
  * @param {Object} req - Express request object

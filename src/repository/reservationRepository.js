@@ -192,11 +192,12 @@ export const getReservationById = async (id) => {
  * @param {Object} options - Filter options
  * @param {String} options.customerId - Filter by customer ID
  * @param {String} options.staffId - Filter by staff ID
- * @param {String} options.status - Filter by reservation status
+ * @param {String | Array<String>} options.status - Filter by reservation status or array of statuses
  * @param {Date} options.startDate - Filter by start date
  * @param {Date} options.endDate - Filter by end date
  * @param {Number} options.page - Page number for pagination
  * @param {Number} options.limit - Items per page for pagination
+ * @param {String} options.orderBy - Sorting order (e.g., 'sessionTime:asc')
  * @returns {Promise<Object>} Paginated reservations and count
  */
 export const getReservations = async (options = {}) => {
@@ -208,6 +209,7 @@ export const getReservations = async (options = {}) => {
     endDate,
     page = 1,
     limit = 10,
+    orderBy = "createdAt:desc", // Default sort order
   } = options;
 
   // Build filter conditions
@@ -222,7 +224,11 @@ export const getReservations = async (options = {}) => {
   }
 
   if (status) {
-    where.status = status;
+    if (Array.isArray(status)) {
+      where.status = { in: status };
+    } else {
+      where.status = status;
+    }
   }
 
   // Date range filtering
@@ -254,6 +260,16 @@ export const getReservations = async (options = {}) => {
   // Get total count
   const total = await prisma.reservation.count({ where });
 
+  // Determine sorting
+  let orderByCondition;
+  if (orderBy === "sessionTime:asc") {
+    orderByCondition = { session: { timeSlot: { startTime: "asc" } } };
+  } else if (orderBy === "sessionTime:desc") {
+    orderByCondition = { session: { timeSlot: { startTime: "desc" } } };
+  } else {
+    orderByCondition = { createdAt: "desc" }; // Default
+  }
+
   // Get paginated reservations
   const reservations = await prisma.reservation.findMany({
     where,
@@ -281,9 +297,7 @@ export const getReservations = async (options = {}) => {
     },
     skip,
     take: limit,
-    orderBy: {
-      createdAt: "desc",
-    },
+    orderBy: orderByCondition,
   });
 
   return {
@@ -731,4 +745,127 @@ export const getPaymentStats = async () => {
     console.error("[REPOSITORY ERROR] getPaymentStats:", error);
     throw error;
   }
+};
+
+/**
+ * Get upcoming reservations with various filter options
+ * @param {Object} options - Filter options
+ * @param {String} options.customerId - Filter by customer ID
+ * @param {String} options.staffId - Filter by staff ID
+ * @param {Number} options.page - Page number for pagination
+ * @param {Number} options.limit - Items per page for pagination
+ * @returns {Promise<Object>} Paginated upcoming reservations and count
+ */
+export const getUpcomingReservations = async (options = {}) => {
+  const { customerId, staffId, page = 1, limit = 10 } = options;
+
+  const today = new Date();
+  const startOfToday = new Date(today.setHours(0, 0, 0, 0));
+
+  // Build filter conditions
+  const where = {
+    status: "CONFIRMED", // Only confirmed reservations are upcoming
+    session: {
+      timeSlot: {
+        OR: [
+          {
+            // Option 1: Sessions on future dates
+            operatingSchedule: {
+              date: {
+                gt: startOfToday, // Date is after the start of today
+              },
+            },
+          },
+          {
+            // Option 2: Sessions today but in the future
+            AND: [
+              {
+                operatingSchedule: {
+                  date: {
+                    equals: startOfToday, // Date is exactly today
+                  },
+                },
+              },
+              {
+                startTime: {
+                  gt: new Date(), // TimeSlot's startTime is after the current time
+                },
+              },
+            ],
+          },
+        ],
+      },
+    },
+  };
+
+  if (customerId) {
+    where.customerId = customerId;
+  }
+
+  if (staffId) {
+    where.staffId = staffId;
+  }
+
+  // Calculate pagination
+  const skip = (page - 1) * limit;
+
+  // Get total count for pagination
+  const total = await prisma.reservation.count({ where });
+
+  // Get paginated upcoming reservations
+  const reservations = await prisma.reservation.findMany({
+    where,
+    include: {
+      customer: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phoneNumber: true,
+        },
+      },
+      service: true,
+      staff: true,
+      session: {
+        include: {
+          timeSlot: {
+            include: {
+              operatingSchedule: true,
+            },
+          },
+        },
+      },
+      payment: true,
+    },
+    skip,
+    take: limit,
+    orderBy: [
+      {
+        session: {
+          timeSlot: {
+            operatingSchedule: {
+              date: "asc",
+            },
+          },
+        },
+      },
+      {
+        session: {
+          timeSlot: {
+            startTime: "asc",
+          },
+        },
+      },
+    ],
+  });
+
+  return {
+    data: reservations,
+    pagination: {
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    },
+  };
 };
