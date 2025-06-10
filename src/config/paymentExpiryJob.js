@@ -6,6 +6,7 @@ import {
   updateReservationStatus,
 } from "../repository/reservationRepository.js";
 import * as notificationService from "../services/notificationService.js";
+import crypto from "node:crypto"; // <-- TAMBAHKAN BARIS INI
 
 // Function untuk process expired payments
 const processExpiredPayments = async () => {
