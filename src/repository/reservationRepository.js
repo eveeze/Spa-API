@@ -337,6 +337,68 @@ export const updateReservationStatus = async (id, status) => {
     },
   });
 };
+/**
+ * Updates reservation details and associated customer info
+ * @param {String} id - The reservation ID to update
+ * @param {Object} reservationData - The reservation data to update (e.g., babyName, notes)
+ * @param {Object} customerData - The customer data to update (e.g., name)
+ * @returns {Promise<Object>} The fully updated reservation object
+ */
+export const updateReservationDetails = async (
+  id,
+  reservationData,
+  customerData
+) => {
+  return prisma.$transaction(async (tx) => {
+    // 1. Update the reservation itself
+    const updatedReservation = await tx.reservation.update({
+      where: { id },
+      data: reservationData,
+    });
+
+    // 2. If there's customer data to update, update the related customer
+    if (customerData && Object.keys(customerData).length > 0) {
+      await tx.customer.update({
+        where: { id: updatedReservation.customerId },
+        data: customerData,
+      });
+    }
+
+    // 3. Re-fetch the reservation with all includes to return the complete updated data
+    return tx.reservation.findUnique({
+      where: { id },
+      include: {
+        customer: {
+          select: { id: true, name: true, email: true, phoneNumber: true },
+        },
+        service: true,
+        staff: true,
+        session: {
+          include: {
+            timeSlot: { include: { operatingSchedule: true } },
+          },
+        },
+        payment: true,
+      },
+    });
+  });
+};
+/**
+ * Updates the payment proof for an existing payment record.
+ * @param {string} paymentId - The ID of the payment to update.
+ * @param {string} newProofUrl - The URL of the new payment proof file.
+ * @returns {Promise<Object>} The updated payment object.
+ */
+export const updatePaymentProof = async (paymentId, newProofUrl) => {
+  return await prisma.payment.update({
+    where: { id: paymentId },
+    data: {
+      paymentProof: newProofUrl,
+      paymentStatus: "PENDING", // Reset status untuk verifikasi ulang
+      paymentDate: null, // Reset tanggal bayar
+    },
+  });
+};
 
 /**
  * Create payment for a reservation

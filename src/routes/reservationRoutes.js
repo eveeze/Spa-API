@@ -16,7 +16,10 @@ import {
   uploadManualPaymentProof,
   testTripayIntegration,
   getUpcomingReservationsHandler,
+  updateManualPaymentProofHandler,
   getUpcomingReservationsForDay,
+  updateReservationDetailsHandler,
+  confirmManualWithProofHandler,
 } from "../controller/reservationController.js";
 import {
   customerAuth,
@@ -75,14 +78,27 @@ router.get(
   ownerAuth,
   getUpcomingReservationsForDay
 );
+router.put("/owner/details/:id", ownerAuth, updateReservationDetailsHandler);
 router.put("/owner/:id/status", ownerAuth, updateReservation);
 router.get("/owner/payment/:reservationId", ownerAuth, getPaymentDetails);
 router.put("/owner/payment/:paymentId/verify", ownerAuth, verifyManualPayment);
+router.put(
+  "/owner/payment-proof/:reservationId",
+  ownerAuth,
+  paymentProofUploadMiddleware,
+  updateManualPaymentProofHandler
+);
 
 router.put(
   "/owner/manual/:reservationId/payment",
   ownerAuth,
   updateManualReservationPayment
+);
+router.post(
+  "/owner/manual/:reservationId/confirm-with-proof",
+  ownerAuth,
+  paymentProofUploadMiddleware,
+  confirmManualWithProofHandler
 );
 router.post(
   "/owner/manual/:reservationId/payment-proof",

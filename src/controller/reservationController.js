@@ -12,6 +12,8 @@ import {
   getPaymentById,
   getExpiredPendingPayments,
   getUpcomingReservations,
+  updatePaymentProof,
+  updateReservationDetails,
 } from "../repository/reservationRepository.js";
 import {
   getSessionById,
@@ -624,7 +626,58 @@ export const updateReservation = async (req, res) => {
     });
   }
 };
+/**
+ * Update reservation details (name, age, notes, etc.)
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const updateReservationDetailsHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { customerName, babyName, babyAge, parentNames, notes } = req.body;
 
+    // Separate data for reservation and customer models
+    const reservationUpdateData = {};
+    const customerUpdateData = {};
+
+    if (babyName !== undefined) reservationUpdateData.babyName = babyName;
+    if (parentNames !== undefined)
+      reservationUpdateData.parentNames = parentNames;
+    if (notes !== undefined) reservationUpdateData.notes = notes;
+    if (babyAge !== undefined) {
+      const age = parseInt(babyAge, 10);
+      if (isNaN(age)) {
+        return res.status(400).json({
+          success: false,
+          message: "Baby age must be a valid number.",
+        });
+      }
+      reservationUpdateData.babyAge = age;
+    }
+
+    if (customerName !== undefined) customerUpdateData.name = customerName;
+
+    // Call the repository function with the separated data
+    const updatedReservation = await updateReservationDetails(
+      id,
+      reservationUpdateData,
+      customerUpdateData
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Reservation updated successfully",
+      data: updatedReservation,
+    });
+  } catch (error) {
+    console.error("[UPDATE RESERVATION DETAILS ERROR]:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update reservation details",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
 //  handlePaymentCallback function - FIXED VERSION
 export const handlePaymentCallback = async (req, res) => {
   try {
@@ -1731,6 +1784,9 @@ export const createManualReservation = async (req, res) => {
         paymentProof: result.payment.paymentProof,
         paymentDate: result.payment.paymentDate,
         expiryDate: result.payment.expiryDate,
+        reservationId: result.payment.reservationId, // Also good to include
+        createdAt: result.payment.createdAt,
+        updatedAt: result.payment.updatedAt,
       },
     };
 
@@ -2304,4 +2360,147 @@ const calculateTotalPrice = async ({ serviceId, babyAge, priceTierId }) => {
   }
 
   return service.price;
+};
+/**
+ * Updates the payment proof for an existing reservation.
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const updateManualPaymentProofHandler = async (req, res) => {
+  try {
+    const { reservationId } = req.params;
+
+    if (!req.paymentProofUrl) {
+      return res.status(400).json({
+        success: false,
+        message: "New payment proof file is required",
+      });
+    }
+
+    const reservation = await getReservationById(reservationId);
+    if (!reservation || !reservation.payment) {
+      return res.status(404).json({
+        success: false,
+        message: "Reservation or its payment record not found",
+      });
+    }
+
+    // Update payment proof URL di database dan reset statusnya
+    const updatedPayment = await updatePaymentProof(
+      reservation.payment.id,
+      req.paymentProofUrl
+    );
+
+    // Reset status reservasi juga agar konsisten
+    await updateReservationStatus(reservationId, "PENDING");
+
+    // Kirim notifikasi ke customer (opsional)
+    await notificationService.sendReservationNotification(
+      reservation.customerId,
+      "Payment Proof Updated",
+      `Your payment proof for reservation of ${reservation.service.name} has been updated. Please wait for verification.`,
+      "payment",
+      reservation.id
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment proof updated successfully. Waiting for verification.",
+      data: {
+        payment: updatedPayment,
+      },
+    });
+  } catch (error) {
+    console.error("[UPDATE PAYMENT PROOF ERROR]:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update payment proof",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+/**
+ * Confirms a manual reservation by uploading a payment proof.
+ * This action marks the payment as PAID and the reservation as CONFIRMED.
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const confirmManualWithProofHandler = async (req, res) => {
+  try {
+    const { reservationId } = req.params;
+
+    if (!req.paymentProofUrl) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Payment proof file is required" });
+    }
+
+    const reservation = await getReservationById(reservationId);
+    if (!reservation) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Reservation not found" });
+    }
+
+    if (
+      reservation.reservationType !== "MANUAL" ||
+      reservation.status !== "PENDING"
+    ) {
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "This action is only for pending manual reservations.",
+        });
+    }
+
+    if (!reservation.payment) {
+      return res
+        .status(404)
+        .json({
+          success: false,
+          message: "Payment record for this reservation not found",
+        });
+    }
+
+    // Lakukan update dalam satu transaksi database
+    const [updatedPayment, updatedReservation] = await prisma.$transaction([
+      // 1. Update Payment
+      prisma.payment.update({
+        where: { id: reservation.payment.id },
+        data: {
+          paymentProof: req.paymentProofUrl,
+          paymentStatus: "PAID",
+          paymentDate: new Date(),
+          paymentMethod: "BANK_TRANSFER", // Asumsikan transfer jika ada bukti
+        },
+      }),
+      // 2. Update Reservation
+      prisma.reservation.update({
+        where: { id: reservationId },
+        data: {
+          status: "CONFIRMED",
+        },
+      }),
+    ]);
+
+    // Kirim notifikasi (opsional)
+    // ...
+
+    return res.status(200).json({
+      success: true,
+      message: "Reservation confirmed successfully with payment proof.",
+      data: {
+        payment: updatedPayment,
+        reservation: updatedReservation,
+      },
+    });
+  } catch (error) {
+    console.error("[CONFIRM WITH PROOF ERROR]:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to confirm reservation with proof",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
 };
