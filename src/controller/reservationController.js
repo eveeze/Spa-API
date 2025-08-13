@@ -134,318 +134,267 @@ export const getUpcomingReservationsForDay = async (req, res) => {
     });
   }
 };
+const mapTripayMethodToEnum = (tripayCode) => {
+  if (!tripayCode) return "BANK_TRANSFER";
+  const code = tripayCode.toUpperCase();
+
+  // Semua varian QRIS dari Tripay diterjemahkan menjadi 'QRIS' untuk database kita
+  if (code.startsWith("QRIS")) return "QRIS";
+
+  // Semua varian Virtual Account diterjemahkan menjadi 'BANK_TRANSFER'
+  if (code.includes("VA")) return "BANK_TRANSFER";
+
+  // Semua varian E-Wallet diterjemahkan menjadi 'E_WALLET'
+  if (["OVO", "GOPAY", "DANA", "SHOPEEPAY"].includes(code)) return "E_WALLET";
+
+  console.warn(`[PaymentMapper] Unmapped Tripay code: ${tripayCode}`);
+  // Jika tidak ada pemetaan, kita bisa gunakan nilai default atau lempar error
+  // Untuk keamanan, kita bisa kembalikan nilai yang kita tahu pasti ada di enum
+  return "BANK_TRANSFER";
+};
+
 /**
  * Create a new reservation
  * @param {Object} req - Express request object
  * @param {Object} res - Express response object
  */
 export const createNewReservation = async (req, res) => {
-  const transaction = await prisma.$transaction(async (tx) => {
-    try {
-      const {
-        serviceId,
-        sessionId,
-        babyName,
-        babyAge,
-        priceTierId,
-        notes,
-        paymentMethod,
-      } = req.body;
-
-      // Validate required fields
-      if (!serviceId || !sessionId || !babyName || babyAge === undefined) {
-        throw new Error(
-          "Missing required fields: serviceId, sessionId, babyName, and babyAge are required"
-        );
-      }
-
-      // Validasi babyAge
-      if (typeof babyAge !== "number" || babyAge < 0) {
-        throw new Error("babyAge must be a valid number (0 or greater)");
-      }
-
-      // Get service details with transaction
-      const service = await tx.service.findUnique({
-        where: { id: serviceId },
-        include: {
-          priceTiers: true,
-        },
-      });
-
-      if (!service) {
-        throw new Error("Service not found");
-      }
-
-      // Validate service and price tiers
-      if (service.hasPriceTiers) {
-        if (!priceTierId) {
-          throw new Error(
-            "priceTierId is required for services with price tiers"
-          );
-        }
-
-        const priceTier = service.priceTiers?.find(
-          (tier) => tier.id === priceTierId
-        );
-        if (!priceTier) {
-          throw new Error("Invalid priceTierId for this service");
-        }
-
-        if (babyAge < priceTier.minBabyAge || babyAge > priceTier.maxBabyAge) {
-          throw new Error(
-            `Baby age (${babyAge} months) is not within the valid range for selected price tier (${priceTier.minBabyAge}-${priceTier.maxBabyAge} months)`
-          );
-        }
-      } else {
-        if (priceTierId) {
-          throw new Error(
-            "priceTierId should not be provided for services without price tiers"
-          );
-        }
-
-        if (service.minBabyAge !== null && babyAge < service.minBabyAge) {
-          throw new Error(
-            `Baby age (${babyAge} months) is below minimum required age (${service.minBabyAge} months) for this service`
-          );
-        }
-
-        if (service.maxBabyAge !== null && babyAge > service.maxBabyAge) {
-          throw new Error(
-            `Baby age (${babyAge} months) exceeds maximum allowed age (${service.maxBabyAge} months) for this service`
-          );
-        }
-      }
-
-      if (!service.isActive) {
-        throw new Error("Selected service is currently not available");
-      }
-
-      // Get session details with atomic check and potential booking
-      const session = await tx.session.findUnique({
-        where: { id: sessionId },
-        include: {
-          staff: true,
-        },
-      });
-
-      if (!session) {
-        throw new Error("Session not found");
-      }
-
-      // CRITICAL: Check session availability with database lock
-      if (session.isBooked) {
-        throw new Error("Session is already booked");
-      }
-
-      if (!session.staff.isActive) {
-        throw new Error("Selected session staff is currently not available");
-      }
-
-      // Calculate price
-      const totalPrice = await calculateTotalPrice({
-        serviceId,
-        babyAge,
-        priceTierId,
-      });
-
-      const reservationData = {
-        customerId: req.customer.id,
-        serviceId,
-        staffId: session.staffId,
-        sessionId,
-        babyName: babyName.trim(),
-        babyAge,
-        priceTierId,
-        notes: notes?.trim() || null,
-        reservationType: "ONLINE",
-        totalPrice,
-      };
-
-      const reservation = await tx.reservation.create({
-        data: reservationData,
-        include: {
-          customer: true,
-          service: true,
-          staff: true,
-          session: true,
-        },
-      });
-
-      let paymentData = null;
-
-      if (paymentMethod) {
-        // Validate payment method
-        const paymentChannels = await getPaymentChannels(2);
-        const selectedPaymentMethod = paymentChannels.find(
-          (channel) => channel.code === paymentMethod && channel.active
-        );
-
-        if (!selectedPaymentMethod) {
-          throw new Error("Invalid or inactive payment method");
-        }
-
-        const cleanedPhone = validateAndFormatPhone(
-          reservation.customer.phoneNumber
-        );
-
-        const tripayPaymentData = {
-          reservationId: reservation.id,
-          customerName: reservation.customer.name.trim(),
-          customerEmail: reservation.customer.email.trim(),
-          customerPhone: cleanedPhone,
-          paymentMethod: paymentMethod,
-          amount: totalPrice,
-          serviceName: reservation.service.name,
-        };
-
-        // Create transaction in Tripay (outside of DB transaction)
-        let tripayTransaction;
-        try {
-          tripayTransaction = await createTransaction(tripayPaymentData);
-        } catch (tripayError) {
-          console.error("[TRIPAY TRANSACTION ERROR]:", tripayError);
-
-          let errorMessage =
-            "Failed to process payment. Please try again later.";
-          if (
-            tripayError.message.includes("timeout") ||
-            tripayError.message.includes("ECONNABORTED")
-          ) {
-            errorMessage =
-              "Payment service is temporarily unavailable. Please try again in a few minutes.";
-          } else if (tripayError.message.includes("Invalid payment amount")) {
-            errorMessage =
-              "Invalid payment amount. Please check your order details.";
-          }
-
-          throw new Error(errorMessage);
-        }
-
-        const expiryDate = addHours(new Date(), 24);
-
-        // Create payment record within transaction
-        const payment = await tx.payment.create({
-          data: {
-            reservationId: reservation.id,
-            amount: reservation.totalPrice,
-            paymentMethod: paymentMethod,
-            paymentStatus: "PENDING",
-            transactionId: tripayTransaction.reference,
-            tripayPaymentUrl: tripayTransaction.checkout_url,
-            expiryDate: expiryDate,
-            tripayResponse: tripayTransaction,
-            tripayInstructions: tripayTransaction.instructions || {},
-          },
-        });
-
-        paymentData = {
-          payment,
-          tripayTransaction,
-          selectedPaymentMethod,
-          expiryDate,
-        };
-      }
-
-      return { reservation, paymentData };
-    } catch (error) {
-      throw error;
-    }
-  });
+  const {
+    serviceId,
+    sessionId,
+    babyName,
+    babyAge,
+    priceTierId,
+    notes,
+    paymentMethod, // Kode asli dari frontend/Tripay, misal: "QRIS2"
+  } = req.body;
 
   try {
-    const { reservation, paymentData } = await transaction;
-
-    // Schedule payment expiry and send notifications outside of DB transaction
-    if (paymentData) {
-      const { payment, tripayTransaction, selectedPaymentMethod, expiryDate } =
-        paymentData;
-
-      // Schedule payment expiry
-      paymentScheduler.schedulePaymentExpiry(payment.id, expiryDate);
-
-      // Send notification
-      await notificationService.sendReservationNotification(
-        reservation.customer.id,
-        "New Reservation - Payment Required",
-        `Your reservation for ${reservation.service.name} has been created. Please complete the payment within 24 hours to confirm your booking.`,
-        "reservation",
-        reservation.id
-      );
-
-      return res.status(201).json({
-        success: true,
-        message:
-          "Reservation created successfully. Please complete payment to confirm your booking.",
-        data: {
-          reservation: {
-            ...reservation,
-            status: "PENDING_PAYMENT",
-          },
-          payment: {
-            id: payment.id,
-            amount: payment.amount,
-            paymentMethod: payment.paymentMethod,
-            status: payment.paymentStatus,
-            expiryDate: payment.expiryDate,
-            paymentUrl: tripayTransaction.checkout_url,
-            paymentInstructions: tripayTransaction.instructions,
-            fee: {
-              flat: selectedPaymentMethod.fee_flat || 0,
-              percent: selectedPaymentMethod.fee_percent || 0,
-            },
-            qrCode: tripayTransaction.qr_string || null,
-          },
-          warning:
-            "This reservation is not confirmed until payment is completed. The session slot is not yet reserved.",
-        },
-      });
-    } else {
-      return res.status(201).json({
-        success: true,
-        message:
-          "Reservation created successfully. Payment is required to confirm booking.",
-        data: {
-          ...reservation,
-          status: "PENDING_PAYMENT",
-          warning:
-            "This reservation requires payment to be confirmed. The session slot is not yet reserved.",
-        },
+    // ---- 1. VALIDASI INPUT & PERSIAPAN DATA ----
+    if (!serviceId || !sessionId || !babyName || babyAge === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Informasi layanan, sesi, nama dan umur bayi wajib diisi.",
       });
     }
+    const age = parseInt(babyAge, 10);
+    if (isNaN(age) || age < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Umur bayi harus dalam format angka yang valid.",
+      });
+    }
+
+    const [service, session, customer] = await Promise.all([
+      getServiceById(serviceId),
+      getSessionById(sessionId),
+      prisma.customer.findUnique({ where: { id: req.customer.id } }),
+    ]);
+
+    if (!service)
+      return res
+        .status(404)
+        .json({ success: false, message: "Layanan tidak ditemukan." });
+    if (!session)
+      return res
+        .status(404)
+        .json({ success: false, message: "Sesi tidak ditemukan." });
+    if (session.isBooked)
+      return res.status(409).json({
+        success: false,
+        message: "Sesi ini sudah dipesan. Silakan pilih jadwal lain.",
+      });
+    if (!customer)
+      return res
+        .status(404)
+        .json({ success: false, message: "Data pelanggan tidak ditemukan." });
+
+    const totalPrice = await calculateTotalPrice({
+      serviceId,
+      babyAge: age,
+      priceTierId,
+    });
+
+    // ---- 2. TRANSAKSI DATABASE (menyimpan data awal) ----
+    const { reservation, payment } = await prisma.$transaction(async (tx) => {
+      const createdReservation = await tx.reservation.create({
+        data: {
+          customerId: customer.id,
+          serviceId,
+          staffId: session.staffId,
+          sessionId,
+          babyName: babyName.trim(),
+          babyAge: age,
+          priceTierId,
+          notes: notes?.trim() || null,
+          reservationType: "ONLINE",
+          totalPrice,
+          status: "PENDING",
+        },
+      });
+
+      // TERJEMAHKAN kode dari Tripay ke ENUM internal database
+      const dbPaymentMethod = mapTripayMethodToEnum(paymentMethod);
+
+      const createdPayment = await tx.payment.create({
+        data: {
+          reservationId: createdReservation.id,
+          amount: totalPrice,
+          paymentMethod: dbPaymentMethod,
+          paymentStatus: "PENDING",
+          expiryDate: addHours(new Date(), 24),
+        },
+      });
+
+      await tx.session.update({
+        where: { id: sessionId },
+        data: { isBooked: true },
+      });
+
+      return { reservation: createdReservation, payment: createdPayment };
+    });
+
+    // ---- 3. INTERAKSI DENGAN PIHAK KETIGA (SETELAH DB SUKSES) ----
+    const tripayPaymentData = {
+      reservationId: reservation.id,
+      customerName: customer.name.trim(),
+      customerEmail: customer.email.trim(),
+      customerPhone: validateAndFormatPhone(customer.phoneNumber),
+      paymentMethod: paymentMethod, // Kirim kode asli ke Tripay
+      amount: totalPrice,
+      serviceName: service.name,
+    };
+
+    const tripayTransaction = await createTransaction(tripayPaymentData);
+
+    // ---- 4. FINALISASI (Update record & kirim notifikasi) ----
+    const updatedPayment = await updatePayment(payment.id, {
+      transactionId: tripayTransaction.reference,
+      tripayPaymentUrl: tripayTransaction.checkout_url,
+      tripayResponse: tripayTransaction,
+      tripayInstructions: tripayTransaction.instructions || {},
+    });
+
+    paymentScheduler.schedulePaymentExpiry(
+      updatedPayment.id,
+      updatedPayment.expiryDate
+    );
+
+    await notificationService.sendReservationNotification(
+      customer.id,
+      "Reservasi Baru Menunggu Pembayaran",
+      `Reservasi Anda untuk ${service.name} telah dibuat. Selesaikan pembayaran dalam 24 jam.`,
+      "reservation",
+      reservation.id
+    );
+
+    // ---- 5. KIRIM RESPONS SUKSES KE FRONTEND ----
+    const responseData = {
+      reservation: {
+        id: reservation.id,
+        status: reservation.status,
+        serviceName: service.name,
+      },
+      payment: {
+        id: updatedPayment.id,
+        status: updatedPayment.paymentStatus,
+        expiryDate: updatedPayment.expiryDate,
+        tripayPaymentUrl: updatedPayment.tripayPaymentUrl,
+        qrCode: tripayTransaction.qr_string || null,
+        instructions: tripayTransaction.instructions || {},
+      },
+    };
+
+    return res.status(201).json({
+      success: true,
+      message: "Reservasi berhasil dibuat. Silakan selesaikan pembayaran.",
+      data: responseData,
+    });
   } catch (error) {
     console.error("[CREATE RESERVATION ERROR]:", error);
 
-    // Return appropriate error response
-    if (error.message.includes("already booked")) {
+    // Handle unique constraint error (P2002) for sessionId specifically
+    // This means the session was already booked by another concurrent request
+    if (error.code === "P2002" && error.meta?.target?.includes("sessionId")) {
+      console.error(
+        `[CREATE RESERVATION ERROR] Unique constraint violation on sessionId: ${sessionId}. Session likely booked by another user.`
+      );
+      // Attempt to rollback the session if it was prematurely marked as booked in case of an earlier error
+      // Note: The transaction itself should handle atomicity. This is more of a fallback/cleanup if issues arise.
+      if (sessionId) {
+        try {
+          // Ensure the session is indeed not booked if it was part of this failed transaction attempt
+          // This check is a safeguard, as Prisma transaction should roll back if the `create` fails.
+          const currentSession = await getSessionById(sessionId);
+          if (currentSession && currentSession.isBooked) {
+            // Only unbook if this failed reservation was the one that booked it, and it's not confirmed
+            const existingReservationForSession =
+              await prisma.reservation.findUnique({
+                where: { sessionId: sessionId },
+                select: {
+                  status: true,
+                  payment: { select: { paymentStatus: true } },
+                },
+              });
+
+            // If no reservation exists, or if it's not confirmed/paid, unbook the session
+            if (
+              !existingReservationForSession ||
+              (existingReservationForSession.status !== "CONFIRMED" &&
+                existingReservationForSession.payment?.paymentStatus !== "PAID")
+            ) {
+              await updateSessionBookingStatus(sessionId, false);
+              console.log(
+                `[ROLLBACK] Session ${sessionId} unbooked due to failed reservation (P2002 error).`
+              );
+            }
+          }
+        } catch (rollbackError) {
+          console.error(
+            `[ROLLBACK FAILED] for session ${sessionId} after P2002:`,
+            rollbackError
+          );
+        }
+      }
       return res.status(409).json({
         success: false,
         message:
-          "Session is no longer available. Please select another session.",
+          "Sesi ini sudah dipesan oleh pengguna lain. Silakan pilih jadwal atau sesi lain.",
+        error:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
 
-    if (error.message.includes("Payment service")) {
-      return res.status(503).json({
-        success: false,
-        message: error.message,
-      });
+    // General rollback logic if other errors occur
+    if (sessionId) {
+      try {
+        const sessionToRollback = await getSessionById(sessionId);
+        if (sessionToRollback?.isBooked) {
+          const associatedReservation = await prisma.reservation.findUnique({
+            where: { sessionId },
+          });
+          if (
+            !associatedReservation ||
+            associatedReservation.payment?.paymentStatus !== "PAID"
+          ) {
+            await updateSessionBookingStatus(sessionId, false);
+            console.log(
+              `[ROLLBACK] Session ${sessionId} has been unbooked due to an error.`
+            );
+          }
+        }
+      } catch (rollbackError) {
+        console.error(
+          `[ROLLBACK FAILED] for session ${sessionId}:`,
+          rollbackError
+        );
+      }
     }
 
-    if (
-      error.message.includes("Invalid payment amount") ||
-      error.message.includes("payment method") ||
-      error.message.includes("required") ||
-      error.message.includes("age")
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: error.message,
-      });
-    }
-
-    return res.status(500).json({
+    const statusCode = error.message.includes("already booked") ? 409 : 500;
+    return res.status(statusCode).json({
       success: false,
-      message: "Failed to create reservation",
+      message: error.message || "Gagal membuat reservasi.",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
@@ -678,388 +627,205 @@ export const updateReservationDetailsHandler = async (req, res) => {
     });
   }
 };
-//  handlePaymentCallback function - FIXED VERSION
+
+/**
+ * handlePaymentCallback - VERSI FINAL YANG DIOPTIMALKAN
+ * Merespons callback dari Tripay dengan cepat untuk menghindari timeout,
+ * dan menjalankan tugas yang lama (notifikasi) di latar belakang.
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
 export const handlePaymentCallback = async (req, res) => {
+  // Log penanda callback diterima
+  console.log(
+    `[CALLBACK_START] Received callback for ref: ${
+      req.body?.reference
+    } at ${new Date().toISOString()}`
+  );
+
   try {
-    // Log semua data yang masuk untuk debugging
-    console.log(
-      "[TRIPAY CALLBACK] Raw request body:",
-      JSON.stringify(req.body, null, 2)
-    );
-    console.log(
-      "[TRIPAY CALLBACK] Headers:",
-      JSON.stringify(req.headers, null, 2)
-    );
-
     const callbackData = req.body;
-
-    // Validasi basic callback data
-    if (!callbackData || typeof callbackData !== "object") {
-      console.error("[TRIPAY CALLBACK] Invalid callback data format");
-      return res.status(400).json({
-        success: false,
-        message: "Invalid callback data format",
-      });
+    if (!callbackData || !callbackData.reference || !callbackData.status) {
+      console.error(
+        "[CALLBACK_VALIDATION_ERROR] Invalid callback data: missing reference or status."
+      );
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid callback data" });
     }
 
-    // Extract required fields with fallback
-    const {
-      reference,
-      status,
-      merchant_ref,
-      total_amount,
-      fee_merchant,
-      signature,
-    } = callbackData;
+    const { reference, status, fee_merchant } = callbackData;
+    console.log(
+      `[CALLBACK_PROCESSING] Processing: Ref: ${reference}, Status: ${status}`
+    );
 
-    // Validasi field yang wajib ada
-    if (!reference) {
-      console.error("[TRIPAY CALLBACK] Missing reference field");
-      return res.status(400).json({
-        success: false,
-        message: "Missing required field: reference",
-      });
-    }
-
-    if (!status) {
-      console.error("[TRIPAY CALLBACK] Missing status field");
-      return res.status(400).json({
-        success: false,
-        message: "Missing required field: status",
-      });
-    }
-
-    console.log("[TRIPAY CALLBACK] Received callback:", {
-      reference,
-      status,
-      merchant_ref,
-      total_amount,
-      timestamp: new Date().toISOString(),
-    });
-
-    // Verify callback signature - PERBAIKAN: Skip jika dalam development mode
+    // Verifikasi signature di mode produksi
     if (process.env.NODE_ENV === "production") {
       if (!verifyCallbackSignature(callbackData)) {
-        console.error("[TRIPAY CALLBACK] Signature verification failed:", {
-          reference,
-          signature: signature || "missing",
-          timestamp: new Date().toISOString(),
-        });
-
-        return res.status(400).json({
+        console.error(
+          `[CALLBACK_SIGNATURE_ERROR] Signature verification failed for ref: ${reference}`
+        );
+        // Kirim 200 OK agar Tripay tidak retry, tapi log sebagai error internal
+        return res.status(200).json({
           success: false,
-          message: "Invalid signature",
+          message: "Invalid signature but callback acknowledged",
         });
       }
     } else {
       console.log(
-        "[TRIPAY CALLBACK] Skipping signature verification in development mode"
+        `[CALLBACK_INFO] Skipping signature verification in dev mode for ref: ${reference}`
       );
     }
 
-    // PERBAIKAN: Find payment dengan include semua relasi yang dibutuhkan
+    // --- Operasi Database ---
+    console.log(`[CALLBACK_DB_FIND] Finding payment for ref: ${reference}`);
     const payment = await findPaymentByTransactionIdWithFullData(reference);
 
     if (!payment) {
-      console.error("[TRIPAY CALLBACK] Payment not found:", reference);
-      return res.status(404).json({
-        success: false,
-        message: "Payment not found",
-      });
-    }
-
-    // PERBAIKAN: Validasi struktur data sebelum mengakses nested properties
-    if (!payment.reservation) {
       console.error(
-        "[TRIPAY CALLBACK] Payment reservation data missing:",
-        reference
+        `[CALLBACK_DB_ERROR] Payment not found for ref: ${reference}`
       );
-      return res.status(500).json({
+      // Balas 200 OK agar Tripay berhenti mengirim callback untuk referensi yang tidak ada
+      return res.status(200).json({
         success: false,
-        message: "Invalid payment data structure",
+        message: "Payment not found but callback acknowledged",
       });
     }
+    console.log(
+      `[CALLBACK_DB_FIND_DONE] Payment found for ref: ${reference}. Current status: ${payment.paymentStatus}`
+    );
 
-    console.log("[TRIPAY CALLBACK] Found payment:", {
-      paymentId: payment.id,
-      currentStatus: payment.paymentStatus,
-      reservationId: payment.reservation.id,
-      amount: payment.amount,
-      hasService: !!payment.reservation.service,
-      hasCustomer: !!payment.reservation.customer,
-    });
-
-    // Validate amount consistency - PERBAIKAN: Handle berbagai format amount
-    if (total_amount) {
-      const receivedAmount = parseFloat(total_amount);
-      const expectedAmount = parseFloat(payment.amount);
-
-      if (
-        !isNaN(receivedAmount) &&
-        !isNaN(expectedAmount) &&
-        receivedAmount !== expectedAmount
-      ) {
-        console.error("[TRIPAY CALLBACK] Amount mismatch:", {
-          reference,
-          expectedAmount,
-          receivedAmount,
-        });
-
-        return res.status(400).json({
-          success: false,
-          message: "Amount mismatch",
-        });
-      }
-    }
-
-    // Check if payment is already processed to prevent race condition
+    // Idempotency Check: Jangan proses ulang jika status bukan PENDING
     if (payment.paymentStatus !== "PENDING") {
       console.log(
-        `[TRIPAY CALLBACK] Payment ${reference} already processed with status: ${payment.paymentStatus}`
+        `[CALLBACK_ALREADY_PROCESSED] Ref: ${reference}, not processing again.`
       );
-
-      // Still return success to acknowledge callback
-      return res.status(200).json({
-        success: true,
-        message: "Payment already processed",
-        currentStatus: payment.paymentStatus,
-      });
+      return res
+        .status(200)
+        .json({ success: true, message: "Payment already processed" });
     }
 
-    // Determine new status and actions
-    let paymentStatus;
-    let reservationStatus = payment.reservation.status;
-    let shouldBookSession = false;
+    // Tentukan status baru berdasarkan callback
+    let newPaymentStatus = payment.paymentStatus;
+    let newReservationStatus = payment.reservation.status;
     let shouldFreeSession = false;
 
     switch (status.toUpperCase()) {
       case "PAID":
-        // Cancel timer scheduler dulu sebelum yang lain
-        const cancelResult = paymentScheduler.cancelPaymentExpiry(payment.id);
-        console.log(
-          `[TRIPAY CALLBACK] Payment timer cancelled: ${cancelResult}`
-        );
-
-        paymentStatus = "PAID";
-        reservationStatus = "CONFIRMED";
-        shouldBookSession = true;
+        paymentScheduler.cancelPaymentExpiry(payment.id);
+        newPaymentStatus = "PAID";
+        newReservationStatus = "CONFIRMED";
         break;
-
       case "EXPIRED":
-        // Cancel timer jika ada (mungkin callback datang sebelum timer expire)
         paymentScheduler.cancelPaymentExpiry(payment.id);
-
-        paymentStatus = "EXPIRED";
-        reservationStatus = "EXPIRED";
-        shouldFreeSession = false; // Session belum pernah di-book
+        newPaymentStatus = "EXPIRED";
+        newReservationStatus = "EXPIRED";
+        shouldFreeSession = true;
         break;
-
       case "FAILED":
-        // Cancel timer jika ada
-        paymentScheduler.cancelPaymentExpiry(payment.id);
-
-        paymentStatus = "FAILED";
-        reservationStatus = "CANCELLED";
-        shouldFreeSession = false; // Session belum pernah di-book
-        break;
-
       case "REFUND":
-        // Cancel timer jika ada
         paymentScheduler.cancelPaymentExpiry(payment.id);
-
-        paymentStatus = "REFUNDED";
-        reservationStatus = "CANCELLED";
-        // Jika sebelumnya sudah PAID dan di-refund, perlu free session
-        if (payment.paymentStatus === "PAID") {
-          shouldFreeSession = true;
-        }
+        newPaymentStatus = status.toUpperCase();
+        newReservationStatus = "CANCELLED";
+        shouldFreeSession = true;
         break;
-
-      case "UNPAID":
-        // Status UNPAID biasanya untuk callback awal, tidak perlu action khusus
-        console.log(`[TRIPAY CALLBACK] Payment ${reference} is still unpaid`);
-        paymentStatus = "PENDING";
-        break;
-
       default:
-        console.warn("[TRIPAY CALLBACK] Unknown status:", status);
-        paymentStatus = payment.paymentStatus;
-    }
-
-    // Handle session booking logic
-    if (shouldBookSession) {
-      try {
-        // Cek apakah session masih available
-        const currentSession = await getSessionById(
-          payment.reservation.sessionId
-        );
-
-        if (!currentSession) {
-          throw new Error("Session not found");
-        }
-
-        if (currentSession.isBooked) {
-          // Session sudah di-book oleh orang lain, cancel reservation
-          console.error(
-            "[TRIPAY CALLBACK] Session already booked by another customer:",
-            {
-              sessionId: payment.reservation.sessionId,
-              reference,
-            }
-          );
-
-          // Update payment dan reservation ke CANCELLED
-          await updatePayment(payment.id, {
-            paymentStatus: "CANCELLED",
-            tripayResponse: callbackData,
-            cancelReason: "Session no longer available",
-          });
-
-          await updateReservationStatus(payment.reservation.id, "CANCELLED");
-
-          // PERBAIKAN: Validasi customer data sebelum send notification
-          if (payment.reservation.customer && payment.reservation.customer.id) {
-            const serviceName =
-              payment.reservation.service?.name || "Unknown Service";
-
-            await notificationService.sendReservationNotification(
-              payment.reservation.customer.id,
-              "Reservation Cancelled - Session Unavailable",
-              `Sorry, your reservation for ${serviceName} has been cancelled because the session is no longer available. Your payment will be refunded.`,
-              "payment",
-              payment.reservation.id
-            );
-          }
-
-          return res.status(200).json({
-            success: true,
-            message: "Session no longer available, reservation cancelled",
-          });
-        } else {
-          // Book the session
-          await updateSessionBookingStatus(payment.reservation.sessionId, true);
-          console.log(
-            `[TRIPAY CALLBACK] Session ${payment.reservation.sessionId} booked successfully`
-          );
-        }
-      } catch (sessionError) {
-        console.error(`[TRIPAY CALLBACK] Session booking error:`, sessionError);
-
-        // Fallback: masih update payment tapi tambahkan warning
-        console.warn(
-          `[TRIPAY CALLBACK] Payment ${reference} marked as PAID but session booking failed`
-        );
-      }
-    }
-
-    // Handle session freeing logic
-    if (shouldFreeSession) {
-      try {
-        await updateSessionBookingStatus(payment.reservation.sessionId, false);
         console.log(
-          `[TRIPAY CALLBACK] Session ${payment.reservation.sessionId} freed successfully`
+          `[CALLBACK_INFO] Unhandled status for ref ${reference}: ${status}`
         );
-      } catch (sessionError) {
-        console.error(`[TRIPAY CALLBACK] Session freeing error:`, sessionError);
-      }
+        break;
     }
 
-    // Update payment
-    const updateData = {
-      paymentStatus,
-      paymentDate: paymentStatus === "PAID" ? new Date() : null,
-      tripayResponse: callbackData,
-    };
-
-    if (fee_merchant) {
-      updateData.merchantFee = parseFloat(fee_merchant);
-    }
-
-    await updatePayment(payment.id, updateData);
-
-    // Update reservation status
-    if (reservationStatus !== payment.reservation.status) {
-      await updateReservationStatus(payment.reservation.id, reservationStatus);
-
-      // PERBAIKAN: Validasi data sebelum send notifications
-      const hasCustomer =
-        payment.reservation.customer && payment.reservation.customer.id;
-      const serviceName =
-        payment.reservation.service?.name || "Unknown Service";
-
-      if (hasCustomer) {
-        // Send appropriate notifications
-        if (reservationStatus === "CONFIRMED") {
-          await notificationService.sendReservationNotification(
-            payment.reservation.customer.id,
-            "Payment Confirmed - Booking Confirmed",
-            `Your payment for ${serviceName} has been confirmed. Your session slot is now reserved.`,
-            "payment",
-            payment.reservation.id
-          );
-        } else if (
-          reservationStatus === "EXPIRED" ||
-          reservationStatus === "CANCELLED"
-        ) {
-          await notificationService.sendReservationNotification(
-            payment.reservation.customer.id,
-            "Reservation Cancelled",
-            `Your reservation for ${serviceName} has been cancelled due to payment issue.`,
-            "payment",
-            payment.reservation.id
-          );
-        }
-      } else {
-        console.warn(
-          `[TRIPAY CALLBACK] Customer data missing, notification not sent for payment ${reference}`
+    // Bebaskan sesi jika pembayaran gagal/expired/refund
+    if (shouldFreeSession) {
+      console.log(`[CALLBACK_SESSION] Freeing session for ref: ${reference}`);
+      await updateSessionBookingStatus(
+        payment.reservation.sessionId,
+        false
+      ).catch((err) => {
+        console.error(
+          `[CALLBACK_SESSION_ERROR] Failed to free session for ref ${reference}:`,
+          err
         );
-      }
-    }
-
-    console.log("[TRIPAY CALLBACK] Successfully processed:", {
-      reference,
-      status,
-      paymentStatus,
-      reservationStatus,
-      sessionBooked: shouldBookSession,
-      sessionFreed: shouldFreeSession,
-      timestamp: new Date().toISOString(),
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Callback processed successfully",
-      data: {
-        reference,
-        status: paymentStatus,
-        reservationStatus,
-        processed: true,
-      },
-    });
-  } catch (error) {
-    console.error("[PAYMENT CALLBACK ERROR]:", error);
-    console.error("[PAYMENT CALLBACK ERROR] Stack:", error.stack);
-
-    if (process.env.NODE_ENV === "production") {
-      console.error("[CRITICAL] Payment callback failed:", {
-        reference: req.body?.reference,
-        error: error.message,
-        timestamp: new Date().toISOString(),
       });
     }
 
-    return res.status(500).json({
+    // Lakukan update ke database jika ada perubahan status
+    if (newPaymentStatus !== payment.paymentStatus) {
+      console.log(
+        `[CALLBACK_DB_UPDATE] Updating status for ref: ${reference} to ${newPaymentStatus}`
+      );
+      await updatePayment(payment.id, {
+        paymentStatus: newPaymentStatus,
+        paymentDate: newPaymentStatus === "PAID" ? new Date() : null,
+        tripayResponse: callbackData,
+        merchantFee: fee_merchant ? parseFloat(fee_merchant) : null,
+      });
+
+      await updateReservationStatus(
+        payment.reservation.id,
+        newReservationStatus
+      );
+      console.log(
+        `[CALLBACK_DB_UPDATE_DONE] DB update finished for ref: ${reference}`
+      );
+
+      // --- KIRIM NOTIFIKASI TANPA MENUNGGU (FIRE-AND-FORGET) ---
+      console.log(
+        `[CALLBACK_NOTIFICATION] Dispatching notifications for ref: ${reference}`
+      );
+      const serviceName = payment.reservation.service?.name || "layanan";
+      if (newReservationStatus === "CONFIRMED") {
+        notificationService
+          .sendReservationNotification(
+            payment.reservation.customer.id,
+            "Pembayaran Berhasil & Reservasi Dikonfirmasi",
+            `Pembayaran Anda untuk ${serviceName} telah kami terima. Reservasi Anda sekarang telah dikonfirmasi.`,
+            "payment",
+            payment.reservation.id
+          )
+          .catch((err) =>
+            console.error(`[NOTIFICATION_ERROR] for ref ${reference}:`, err)
+          );
+      } else if (["EXPIRED", "CANCELLED"].includes(newReservationStatus)) {
+        notificationService
+          .sendReservationNotification(
+            payment.reservation.customer.id,
+            "Reservasi Dibatalkan",
+            `Reservasi Anda untuk ${serviceName} telah dibatalkan karena masalah pembayaran (${status}).`,
+            "payment",
+            payment.reservation.id
+          )
+          .catch((err) =>
+            console.error(`[NOTIFICATION_ERROR] for ref ${reference}:`, err)
+          );
+      }
+    }
+
+    // Kirim respons sukses secepatnya ke Tripay
+    console.log(`[CALLBACK_SUCCESS] Responding 200 OK for ref: ${reference}.`);
+    return res.status(200).json({
+      success: true,
+      message: "Callback processed successfully",
+    });
+  } catch (error) {
+    console.error(
+      `[CALLBACK_FATAL_ERROR] for ref: ${req.body?.reference}:`,
+      error
+    );
+    // Jika terjadi error fatal, tetap balas 200 OK agar Tripay tidak mengulang,
+    // tapi catat error ini di sistem monitoring Anda (Sentry, New Relic, dll.)
+    return res.status(200).json({
       success: false,
-      message: "Failed to process payment callback",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+      message:
+        "An internal server error occurred, but callback was acknowledged.",
     });
   }
 };
 
-// PERBAIKAN: Tambahkan fungsi helper untuk mendapatkan payment dengan semua relasi
 export const findPaymentByTransactionIdWithFullData = async (transactionId) => {
   try {
-    const payment = await prisma.payment.findUnique({
+    const payment = await prisma.payment.findFirst({
       where: { transactionId },
       include: {
         reservation: {
@@ -1079,13 +845,14 @@ export const findPaymentByTransactionIdWithFullData = async (transactionId) => {
                 price: true,
               },
             },
+            // PERBAIKAN UTAMA: Gunakan include bertingkat untuk mengambil data sesi
             session: {
-              select: {
-                id: true,
-                date: true,
-                startTime: true,
-                endTime: true,
-                isBooked: true,
+              include: {
+                timeSlot: {
+                  include: {
+                    operatingSchedule: true, // Ini akan mengambil tanggal dari jadwal operasi
+                  },
+                },
               },
             },
           },
@@ -2446,21 +2213,17 @@ export const confirmManualWithProofHandler = async (req, res) => {
       reservation.reservationType !== "MANUAL" ||
       reservation.status !== "PENDING"
     ) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "This action is only for pending manual reservations.",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "This action is only for pending manual reservations.",
+      });
     }
 
     if (!reservation.payment) {
-      return res
-        .status(404)
-        .json({
-          success: false,
-          message: "Payment record for this reservation not found",
-        });
+      return res.status(404).json({
+        success: false,
+        message: "Payment record for this reservation not found",
+      });
     }
 
     // Lakukan update dalam satu transaksi database

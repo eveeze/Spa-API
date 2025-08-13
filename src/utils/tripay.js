@@ -7,6 +7,7 @@ const TRIPAY_MODE = process.env.TRIPAY_MODE || "sandbox";
 const TRIPAY_API_KEY = process.env.TRIPAY_API_KEY;
 const TRIPAY_PRIVATE_KEY = process.env.TRIPAY_PRIVATE_KEY;
 const TRIPAY_MERCHANT_CODE = process.env.TRIPAY_MERCHANT_CODE;
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173"; // DIUBAH: Gunakan .env
 
 // API URL based on mode
 const TRIPAY_API_URL =
@@ -17,8 +18,6 @@ const TRIPAY_API_URL =
 const CALLBACK_URL =
   process.env.CALLBACK_URL ||
   "http://localhost:3000/api/reservations/payment/callback";
-const RETURN_URL =
-  process.env.RETURN_URL || "http://localhost:3000/payment/success";
 
 // Validate required environment variables
 const validateConfig = () => {
@@ -168,6 +167,7 @@ export const createTransaction = async (paymentData) => {
     // FIXED: Calculate expiry time properly - current time + 24 hours in seconds
     const currentTime = Math.floor(Date.now() / 1000); // Current timestamp in seconds
     const expiryTime = currentTime + 24 * 60 * 60; // Add 24 hours in seconds
+    const return_url = `${FRONTEND_URL}/payment/status?reservation_id=${reservationId}`;
 
     const payload = {
       method: paymentMethod,
@@ -184,7 +184,7 @@ export const createTransaction = async (paymentData) => {
         },
       ],
       callback_url: CALLBACK_URL,
-      return_url: RETURN_URL,
+      return_url: return_url, // DIUBAH: Gunakan return_url yang dinamis
       expired_time: expiryTime, // FIXED: Now using timestamp instead of duration
       signature: signature,
     };

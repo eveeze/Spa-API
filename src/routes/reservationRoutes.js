@@ -39,8 +39,8 @@ if (process.env.NODE_ENV === "development") {
 // Public routes
 router.post(
   "/payment/callback",
-  captureRawBodyForCallback,
-  callbackMiddleware,
+  //captureRawBodyForCallback,
+  //callbackMiddleware,
   handlePaymentCallback
 );
 // Customer routes
