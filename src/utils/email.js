@@ -1,3 +1,5 @@
+// src/utils/email.js
+
 import nodemailer from "nodemailer";
 import fs from "fs";
 import path, { dirname, join } from "path";
@@ -14,29 +16,43 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const generateOTP = () => {
-  return Math.floor(1000 + Math.random() * 9000).toString();
-};
-
-const sendOtp = async (email, otp) => {
+/**
+ * Fungsi baru yang lebih generik untuk mengirim email.
+ * @param {string} to - Alamat email tujuan
+ * @param {string} subject - Judul email
+ * @param {string} html - Konten email dalam format HTML
+ */
+export const sendEmail = async (to, subject, html) => {
   try {
-    const templatePath = join(__dirname, "email.html");
-    let htmlTemplate = fs.readFileSync(templatePath, "utf8");
-    htmlTemplate = htmlTemplate.replace("{{OTP}}", otp);
-
     const mailOptions = {
       from: `Ema Mom Kids Baby Spa <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "Verifikasi OTP",
-      html: htmlTemplate,
+      to: to,
+      subject: subject,
+      html: html,
     };
 
     await transporter.sendMail(mailOptions);
-    console.log(`OTP dikirimkan ke email ${email}`);
+    console.log(`Email dengan subjek "${subject}" berhasil dikirim ke ${to}`);
   } catch (error) {
-    console.error("Error saat mengirimkan OTP ke email : ", error);
+    console.error(`Error saat mengirimkan email ke ${to}: `, error);
     throw error;
   }
 };
 
-export { transporter, generateOTP, sendOtp };
+// Fungsi generateOTP tetap sama
+export const generateOTP = () => {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+};
+
+// Fungsi sendOtp sekarang bisa menggunakan fungsi sendEmail yang baru
+export const sendOtp = async (email, otp) => {
+  const templatePath = join(__dirname, "email.html");
+  let htmlTemplate = fs.readFileSync(templatePath, "utf8");
+  htmlTemplate = htmlTemplate.replace("{{OTP}}", otp);
+
+  // Menggunakan fungsi generik sendEmail
+  await sendEmail(email, "Verifikasi OTP", htmlTemplate);
+};
+
+// Pastikan transporter juga diekspor jika masih dibutuhkan di tempat lain
+export { transporter };

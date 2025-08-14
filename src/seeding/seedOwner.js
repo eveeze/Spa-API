@@ -1,3 +1,4 @@
+// src/seeding/seedOwner.js
 import bcrypt from "bcrypt";
 import dotenv from "dotenv";
 import prisma from "../config/db.js";
