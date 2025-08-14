@@ -138,7 +138,7 @@ const login = async (req, res) => {
         role: "customer",
       },
       process.env.JWT_SECRET,
-      { expiresIn: "24h" },
+      { expiresIn: "24h" }
     );
 
     return res.status(200).json({
@@ -337,6 +337,40 @@ const getAllCustomer = async (req, res) => {
     });
   }
 };
+
+const updatePlayerIdHandler = async (req, res) => {
+  // Ambil playerId dari body request yang dikirim frontend
+  const { playerId } = req.body;
+  // Ambil ID customer dari token JWT yang sudah diverifikasi oleh middleware `customerAuth`
+  const { id: customerId } = req.customer;
+
+  if (!playerId) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Player ID wajib diisi." });
+  }
+
+  try {
+    // Update data customer di database dengan playerId yang baru
+    await prisma.customer.update({
+      where: {
+        id: customerId,
+      },
+      data: {
+        oneSignalPlayerId: playerId,
+      },
+    });
+
+    return res
+      .status(200)
+      .json({ success: true, message: "Player ID berhasil diperbarui." });
+  } catch (error) {
+    console.error("[UPDATE_PLAYER_ID_ERROR]:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Gagal memperbarui Player ID." });
+  }
+};
 const customerController = {
   register,
   verifyOtp,
@@ -348,6 +382,7 @@ const customerController = {
   updateDataCustomer,
   getCustomerProfile,
   getAllCustomer,
+  updatePlayerIdHandler,
 };
 
 export default customerController;

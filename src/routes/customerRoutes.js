@@ -17,6 +17,11 @@ router.post("/reset-password", customerController.resetPassword);
 router.use(customerAuth);
 router.put("/update/:id", customerController.updateDataCustomer);
 router.get("/profile", customerController.getCustomerProfile);
+router.post(
+  "/update-player-id",
+  customerAuth,
+  customerController.updatePlayerIdHandler
+);
 
 router.use(errorHandler);
 export default router;
