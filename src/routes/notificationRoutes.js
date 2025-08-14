@@ -5,7 +5,7 @@ import { combinedAuth } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
-// Cukup satu rute untuk semua.
 router.get("/", combinedAuth, getNotifications);
+router.patch("/:notificationId/read", combinedAuth, markAsRead);
 
 export default router;

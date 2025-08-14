@@ -28,3 +28,32 @@ export const getNotifications = async (req, res) => {
       .json({ success: false, message: "Failed to fetch notifications." });
   }
 };
+
+export const markAsRead = async (req, res) => {
+  const { notificationId } = req.params;
+  const userId = req.customer?.id || req.owner?.id;
+
+  if (!userId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const notification = await prisma.notification.findUnique({
+      where: { id: notificationId },
+    });
+
+    // Pastikan notifikasi ini milik user yang sedang login
+    if (!notification || notification.recipientId !== userId) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    const updatedNotification = await prisma.notification.update({
+      where: { id: notificationId },
+      data: { isRead: true },
+    });
+
+    res.status(200).json({ success: true, data: updatedNotification });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update notification." });
+  }
+};
