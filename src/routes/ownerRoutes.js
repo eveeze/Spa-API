@@ -10,6 +10,7 @@ router.post("/login", ownerController.ownerLogin);
 router.use(ownerAuth); // Middleware berlaku untuk semua route di bawah ini
 
 router.get("/profile", ownerController.getOwnerProfile);
+router.post("/update-player-id", ownerController.updatePlayerIdHandler);
 
 router.use(errorHandler);
 

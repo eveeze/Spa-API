@@ -19,6 +19,7 @@ import timeSlotRoutes from "./routes/timeSlotRoutes.js";
 import sessionRoutes from "./routes/sessionRoutes.js";
 import reservationRoutes from "./routes/reservationRoutes.js";
 import schedulerRoutes from "./routes/schedulerRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
 dotenv.config();
 
 const app = express();
@@ -30,6 +31,7 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
   },
 });
+
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -73,6 +75,7 @@ app.use("/api/time-slot", timeSlotRoutes);
 app.use("/api/session", sessionRoutes);
 app.use("/api/reservations", reservationRoutes);
 app.use("/api/scheduler", schedulerRoutes);
+app.use("/api/notifications", notificationRoutes);
 const PORT = process.env.PORT || 5000;
 
 app.get("/", (req, res) => {

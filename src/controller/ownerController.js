@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { findOwnerByEmail } from "../repository/ownerRepository.js";
+import prisma from "../config/db.js";
 const ownerLogin = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -72,7 +73,41 @@ const getOwnerProfile = async (req, res) => {
   }
 };
 
+const updatePlayerIdHandler = async (req, res) => {
+  const { playerId } = req.body;
+  // Ambil ID owner dari token JWT yang sudah diverifikasi oleh middleware `ownerAuth`
+  const { id: ownerId } = req.owner;
+
+  if (!playerId) {
+    return res
+      .status(400)
+      .json({ success: false, message: "Player ID is required." });
+  }
+
+  try {
+    await prisma.owner.update({
+      where: {
+        id: ownerId,
+      },
+      data: {
+        oneSignalPlayerId: playerId,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Owner Player ID updated successfully.",
+    });
+  } catch (error) {
+    console.error("[OWNER UPDATE_PLAYER_ID_ERROR]:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to update Player ID." });
+  }
+};
+
 export default {
   ownerLogin,
   getOwnerProfile,
+  updatePlayerIdHandler,
 };

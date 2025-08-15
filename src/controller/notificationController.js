@@ -1,3 +1,4 @@
+// src/controller/notificationController.js
 import prisma from "../config/db.js";
 
 export const getNotifications = async (req, res) => {
