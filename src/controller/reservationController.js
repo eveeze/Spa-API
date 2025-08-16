@@ -313,7 +313,7 @@ export const createNewReservation = async (req, res) => {
         type: "RESERVATION_PENDING",
         referenceId: reservation.id,
       },
-      { sendEmail: true, emailHtml: emailContent }
+      { shouldSendEmail: true, emailHtml: emailContent }
     );
 
     // ---- 5. KIRIM RESPONS SUKSES KE FRONTEND ----
@@ -583,7 +583,7 @@ export const updateReservation = async (req, res) => {
           type: "RESERVATION_CANCELLED_MANUAL",
           referenceId: reservation.id,
         },
-        { sendEmail: true, emailHtml: emailContent }
+        { shouldSendEmail: true, emailHtml: emailContent }
       );
     }
 
@@ -598,7 +598,7 @@ export const updateReservation = async (req, res) => {
           type: "RESERVATION_COMPLETED",
           referenceId: reservation.id,
         },
-        { sendEmail: true, emailHtml: emailContent }
+        { shouldSendEmail: true, emailHtml: emailContent }
       );
     }
     return res.status(200).json({
@@ -852,7 +852,7 @@ export const handlePaymentCallback = async (req, res) => {
             type: "RESERVATION_CANCELLED_AUTO",
             referenceId: reservationId,
           },
-          { sendEmail: true, emailHtml: emailContent }
+          { shouldSendEmail: true, emailHtml: emailContent }
         );
       }
     }

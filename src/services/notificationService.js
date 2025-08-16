@@ -45,7 +45,7 @@ export const createNotificationForCustomer = async (
 ) => {
   const {
     sendPush = false,
-    sendEmail = false,
+    shouldSendEmail = false,
     emailHtml = "",
     pushMessage = "",
   } = options;
@@ -74,7 +74,7 @@ export const createNotificationForCustomer = async (
   }
 
   // 2. Kirim notifikasi real-time jika diminta.
-  if (!sendPush && !sendEmail) return;
+  if (!sendPush && !shouldSendEmail) return;
 
   const customer = await prisma.customer.findUnique({
     where: { id: recipientId },
@@ -97,7 +97,7 @@ export const createNotificationForCustomer = async (
     );
   }
 
-  if (sendEmail && customer.email) {
+  if (shouldSendEmail && customer.email) {
     await sendEmail(customer.email, title, emailHtml || message);
   }
 };
