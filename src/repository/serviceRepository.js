@@ -122,9 +122,19 @@ export const getServiceById = async (id) => {
           minBabyAge: "asc",
         },
       },
-      ratings: {
-        include: {
+      // 1. Ambil relasi 'reservations' yang benar-benar ada di model Service
+      reservations: {
+        // 2. Filter agar hanya mengambil reservasi yang SUDAH memiliki rating
+        where: {
+          rating: {
+            isNot: null,
+          },
+        },
+        // 3. Pilih data yang Anda perlukan dari setiap reservasi
+        select: {
+          rating: true, // Ambil detail rating dari reservasi
           customer: {
+            // Ambil detail customer dari reservasi
             select: {
               id: true,
               name: true,
@@ -132,7 +142,7 @@ export const getServiceById = async (id) => {
           },
         },
         orderBy: {
-          createdAt: "desc",
+          createdAt: "desc", // Urutkan reservasi berdasarkan tanggal dibuat
         },
       },
     },

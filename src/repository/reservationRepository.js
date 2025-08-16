@@ -183,6 +183,7 @@ export const getReservationById = async (id) => {
         },
       },
       payment: true,
+      rating: true,
     },
   });
 };
@@ -294,6 +295,7 @@ export const getReservations = async (options = {}) => {
         },
       },
       payment: true,
+      rating: true,
     },
     skip,
     take: limit,
