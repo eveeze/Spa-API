@@ -6,6 +6,8 @@ import dotenv from "dotenv";
 import { initCronJobs } from "./config/cronScheduler.js";
 import { startPaymentExpiryJob } from "./config/paymentExpiryJob.js";
 import paymentScheduler from "./config/paymentScheduler.js";
+import http from "http";
+import { Server } from "socket.io";
 // import routes
 import customerRoutes from "./routes/customerRoutes.js";
 import ownerRoutes from "./routes/ownerRoutes.js";
@@ -17,13 +19,50 @@ import timeSlotRoutes from "./routes/timeSlotRoutes.js";
 import sessionRoutes from "./routes/sessionRoutes.js";
 import reservationRoutes from "./routes/reservationRoutes.js";
 import schedulerRoutes from "./routes/schedulerRoutes.js";
+import notificationRoutes from "./routes/notificationRoutes.js";
 dotenv.config();
 
 const app = express();
+const server = http.createServer(app);
+
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    methods: ["GET", "POST"],
+  },
+});
 
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+let onlineUsers = new Map();
+
+io.on("connection", (socket) => {
+  console.log(`User Connected: ${socket.id}`);
+
+  // Event untuk mendaftarkan user yang online
+  socket.on("addNewUser", (userId) => {
+    onlineUsers.set(userId, socket.id);
+    console.log("Online users:", Array.from(onlineUsers.keys()));
+  });
+
+  socket.on("disconnect", () => {
+    // Hapus user dari daftar onlineUsers saat disconnect
+    for (let [userId, socketId] of onlineUsers.entries()) {
+      if (socketId === socket.id) {
+        onlineUsers.delete(userId);
+        break;
+      }
+    }
+    console.log(`User Disconnected: ${socket.id}`);
+    console.log("Online users:", Array.from(onlineUsers.keys()));
+  });
+});
+
+// 6. Teruskan instance io dan onlineUsers ke app object agar bisa diakses di controller
+app.set("socketio", io);
+app.set("onlineUsers", onlineUsers);
 
 // define routes
 app.use("/api/customer", customerRoutes);
@@ -36,6 +75,7 @@ app.use("/api/time-slot", timeSlotRoutes);
 app.use("/api/session", sessionRoutes);
 app.use("/api/reservations", reservationRoutes);
 app.use("/api/scheduler", schedulerRoutes);
+app.use("/api/notifications", notificationRoutes);
 const PORT = process.env.PORT || 5000;
 
 app.get("/", (req, res) => {

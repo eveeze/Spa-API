@@ -1,196 +1,167 @@
-// src/services/notificationService.js
 import prisma from "../config/db.js";
+import oneSignalClient from "../config/oneSignalClient.js";
+import { sendEmail } from "../utils/email.js";
 
 /**
- * Send notification to a customer
- * @param {String} customerId - ID of the customer
- * @param {String} title - Notification title
- * @param {String} message - Notification message
- * @param {String} type - Notification type (reservation, payment, etc.)
- * @param {String} referenceId - Reference ID (e.g., reservationId)
+ * [HELPER INTERNAL] Fungsi dasar untuk mengirim Push Notification ke OneSignal.
+ * @private
  */
-export const sendReservationNotification = async (
-  customerId,
-  title,
-  message,
-  type,
-  referenceId,
+const _sendPushNotification = async (playerIds, title, message, data = {}) => {
+  const validPlayerIds = playerIds.filter((id) => id);
+  if (validPlayerIds.length === 0) {
+    console.warn(
+      "[PUSH_NOTIFICATION] Tidak ada Player ID valid. Pengiriman dilewati."
+    );
+    return;
+  }
+  const notification = {
+    contents: { en: message },
+    headings: { en: title },
+    include_player_ids: validPlayerIds,
+    data: data,
+  };
+  try {
+    const response = await oneSignalClient.createNotification(notification);
+    console.log(
+      "[PUSH_NOTIFICATION] Berhasil dikirim ke OneSignal:",
+      response.body.id
+    );
+  } catch (error) {
+    console.error(
+      "[PUSH_NOTIFICATION_ERROR] Gagal mengirim:",
+      error.response?.data || error.message
+    );
+  }
+};
+
+/**
+ * ==========================================================================================
+ * FUNGSI (1): Membuat dan mengirim notifikasi untuk SATU CUSTOMER spesifik.
+ * ==========================================================================================
+ */
+export const createNotificationForCustomer = async (
+  notificationData,
+  options = {}
 ) => {
+  const {
+    sendPush = false,
+    shouldSendEmail = false,
+    emailHtml = "",
+    pushMessage = "",
+  } = options;
+  const { recipientId, title, message, type, referenceId } = notificationData;
+
+  // 1. Simpan notifikasi ke database untuk customer ini.
   try {
     await prisma.notification.create({
       data: {
-        recipientType: "customer",
-        recipientId: customerId,
+        recipientId,
+        recipientType: "customer", // Hardcoded untuk customer
         title,
         message,
         type,
         referenceId,
-        isRead: false,
       },
     });
-  } catch (error) {
-    console.error("[NOTIFICATION SERVICE ERROR]:", error);
-    // Don't throw the error to prevent breaking the main flow
+    console.log(
+      `[DB_NOTIFICATION] Notifikasi untuk customer #${recipientId} berhasil disimpan.`
+    );
+  } catch (dbError) {
+    console.error(
+      "[DB_NOTIFICATION_ERROR] Gagal menyimpan notifikasi:",
+      dbError
+    );
+  }
+
+  // 2. Kirim notifikasi real-time jika diminta.
+  if (!sendPush && !shouldSendEmail) return;
+
+  const customer = await prisma.customer.findUnique({
+    where: { id: recipientId },
+    select: { email: true, oneSignalPlayerId: true },
+  });
+
+  if (!customer) {
+    console.warn(
+      `[NOTIFICATION_SEND] Customer #${recipientId} tidak ditemukan.`
+    );
+    return;
+  }
+
+  if (sendPush && customer.oneSignalPlayerId) {
+    await _sendPushNotification(
+      [customer.oneSignalPlayerId],
+      title,
+      pushMessage || message,
+      { referenceId }
+    );
+  }
+
+  if (shouldSendEmail && customer.email) {
+    await sendEmail(customer.email, title, emailHtml || message);
   }
 };
 
 /**
- * Send notification to all owners
- * @param {String} title - Notification title
- * @param {String} message - Notification message
- * @param {String} type - Notification type (reservation, payment, etc.)
- * @param {String} referenceId - Reference ID (e.g., reservationId)
+ * ==========================================================================================
+ * FUNGSI (2): Membuat notifikasi untuk SEMUA owner dan mengirim satu push notification.
+ * ==========================================================================================
  */
-export const sendNotificationToOwner = async (
-  title,
-  message,
-  type,
-  referenceId,
+export const createNotificationForAllOwners = async (
+  notificationData,
+  options = {}
 ) => {
+  const { sendPush = false } = options;
+  const { title, message, type, referenceId, pushMessage } = notificationData;
+
   try {
-    // Get all owners
     const owners = await prisma.owner.findMany({
-      select: {
-        id: true,
-      },
+      select: { id: true, oneSignalPlayerId: true },
     });
 
-    // Create a notification for each owner
-    const notifications = owners.map((owner) => ({
+    if (owners.length === 0) {
+      console.warn(
+        "[OWNER_NOTIFICATION] Tidak ada owner yang ditemukan di database."
+      );
+      return;
+    }
+
+    // 1. Buat data notifikasi untuk setiap owner (untuk disimpan ke DB)
+    const notificationsToCreate = owners.map((owner) => ({
+      recipientId: owner.id, // ID owner spesifik
       recipientType: "owner",
-      recipientId: owner.id,
       title,
       message,
       type,
       referenceId,
-      isRead: false,
     }));
 
-    // Create all notifications in a single transaction
+    // Simpan semua notifikasi ke database dalam satu perintah
     await prisma.notification.createMany({
-      data: notifications,
+      data: notificationsToCreate,
     });
-  } catch (error) {
-    console.error("[NOTIFICATION SERVICE ERROR]:", error);
-    // Don't throw the error to prevent breaking the main flow
-  }
-};
+    console.log(
+      `[DB_NOTIFICATION] ${owners.length} notifikasi untuk owner berhasil disimpan.`
+    );
 
-/**
- * Get notifications for a recipient
- * @param {String} recipientType - Type of recipient (customer, owner)
- * @param {String} recipientId - ID of the recipient
- * @param {Boolean} unreadOnly - Whether to get only unread notifications
- * @param {Number} page - Page number
- * @param {Number} limit - Items per page
- */
-export const getNotifications = async (
-  recipientType,
-  recipientId,
-  unreadOnly = false,
-  page = 1,
-  limit = 10,
-) => {
-  try {
-    const skip = (page - 1) * limit;
-
-    // Build query conditions
-    const where = {
-      recipientType,
-      recipientId,
-    };
-
-    if (unreadOnly) {
-      where.isRead = false;
+    // 2. Kirim SATU push notification ke semua owner sekaligus (efisien)
+    if (sendPush) {
+      const ownerPlayerIds = owners
+        .map((owner) => owner.oneSignalPlayerId)
+        .filter((id) => id);
+      if (ownerPlayerIds.length > 0) {
+        await _sendPushNotification(
+          ownerPlayerIds,
+          title,
+          pushMessage || message,
+          { referenceId }
+        );
+      }
     }
-
-    // Get total count
-    const total = await prisma.notification.count({ where });
-
-    // Get notifications
-    const notifications = await prisma.notification.findMany({
-      where,
-      orderBy: {
-        createdAt: "desc",
-      },
-      skip,
-      take: limit,
-    });
-
-    return {
-      data: notifications,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
   } catch (error) {
-    console.error("[GET NOTIFICATIONS ERROR]:", error);
-    throw error;
-  }
-};
-
-/**
- * Mark notification as read
- * @param {String} notificationId - ID of the notification
- * @param {String} recipientType - Type of recipient (customer, owner)
- * @param {String} recipientId - ID of the recipient
- */
-export const markNotificationAsRead = async (
-  notificationId,
-  recipientType,
-  recipientId,
-) => {
-  try {
-    // Verify the notification belongs to the recipient
-    const notification = await prisma.notification.findFirst({
-      where: {
-        id: notificationId,
-        recipientType,
-        recipientId,
-      },
-    });
-
-    if (!notification) {
-      throw new Error(
-        "Notification not found or does not belong to the recipient",
-      );
-    }
-
-    // Update notification
-    return await prisma.notification.update({
-      where: { id: notificationId },
-      data: { isRead: true },
-    });
-  } catch (error) {
-    console.error("[MARK NOTIFICATION AS READ ERROR]:", error);
-    throw error;
-  }
-};
-
-/**
- * Mark all notifications as read
- * @param {String} recipientType - Type of recipient (customer, owner)
- * @param {String} recipientId - ID of the recipient
- */
-export const markAllNotificationsAsRead = async (
-  recipientType,
-  recipientId,
-) => {
-  try {
-    // Update all unread notifications for the recipient
-    return await prisma.notification.updateMany({
-      where: {
-        recipientType,
-        recipientId,
-        isRead: false,
-      },
-      data: { isRead: true },
-    });
-  } catch (error) {
-    console.error("[MARK ALL NOTIFICATIONS AS READ ERROR]:", error);
-    throw error;
+    console.error(
+      "[OWNER_NOTIFICATION_ERROR] Gagal membuat notifikasi untuk owner:",
+      error
+    );
   }
 };

@@ -29,7 +29,10 @@ import {
 import prisma from "../config/db.js";
 import { getServiceById } from "../repository/serviceRepository.js";
 import { addHours } from "date-fns";
-import * as notificationService from "../services/notificationService.js";
+import {
+  createNotificationForAllOwners,
+  createNotificationForCustomer,
+} from "../services/notificationService.js";
 import paymentScheduler from "../config/paymentScheduler.js";
 /**
  * Get upcoming reservations
@@ -166,7 +169,7 @@ export const createNewReservation = async (req, res) => {
     babyAge,
     priceTierId,
     notes,
-    paymentMethod, // Kode asli dari frontend/Tripay, misal: "QRIS2"
+    paymentMethod,
   } = req.body;
 
   try {
@@ -280,12 +283,37 @@ export const createNewReservation = async (req, res) => {
       updatedPayment.expiryDate
     );
 
-    await notificationService.sendReservationNotification(
-      customer.id,
-      "Reservasi Baru Menunggu Pembayaran",
-      `Reservasi Anda untuk ${service.name} telah dibuat. Selesaikan pembayaran dalam 24 jam.`,
-      "reservation",
-      reservation.id
+    // Notifikasi untuk SEMUA OWNER: Simpan ke DB & Kirim Push
+    await createNotificationForAllOwners(
+      {
+        title: "Reservasi Baru!",
+        message: `Pelanggan ${customer.name} telah memesan layanan ${service.name}.`,
+        type: "RESERVATION_NEW",
+        referenceId: reservation.id,
+      },
+      { sendPush: true }
+    );
+
+    // Notifikasi untuk CUSTOMER: Simpan ke DB & Kirim Email
+    const emailContent = `<h1>Halo ${
+      customer.name
+    },</h1><p>Reservasi Anda untuk layanan <strong>${
+      service.name
+    }</strong> telah kami terima. Mohon selesaikan pembayaran sebelum ${updatedPayment.expiryDate.toLocaleString(
+      "id-ID"
+    )}.</p><p>Klik <a href="${
+      updatedPayment.tripayPaymentUrl
+    }">di sini</a> untuk membayar.</p>`;
+
+    await createNotificationForCustomer(
+      {
+        recipientId: customer.id,
+        title: "Reservasi Menunggu Pembayaran",
+        message: `Mohon selesaikan pembayaran untuk reservasi ${service.name}.`,
+        type: "RESERVATION_PENDING",
+        referenceId: reservation.id,
+      },
+      { shouldSendEmail: true, emailHtml: emailContent }
     );
 
     // ---- 5. KIRIM RESPONS SUKSES KE FRONTEND ----
@@ -536,31 +564,43 @@ export const updateReservation = async (req, res) => {
     // Update reservation status
     const updatedReservation = await updateReservationStatus(id, status);
 
-    // If cancelled, free up the session
+    // KODE BARU
     if (status === "CANCELLED") {
       await updateSessionBookingStatus(reservation.sessionId, false);
 
-      // Send notification to customer
-      await notificationService.sendReservationNotification(
-        reservation.customer.id,
-        "Reservation Cancelled",
-        `Your reservation for ${reservation.service.name} has been cancelled.`,
-        "reservation",
-        reservation.id
+      const emailContent = `<h1>Reservasi Dibatalkan</h1><p>Dengan hormat, kami memberitahukan bahwa reservasi Anda untuk layanan <strong>${
+        reservation.service.name
+      }</strong> dengan ID #${reservation.id.substring(
+        0,
+        8
+      )} telah dibatalkan. Silakan hubungi kami untuk informasi lebih lanjut.</p>`;
+
+      await createNotificationForCustomer(
+        {
+          recipientId: reservation.customerId,
+          title: "Reservasi Anda Dibatalkan",
+          message: `Reservasi Anda untuk ${reservation.service.name} telah dibatalkan oleh pihak kami.`,
+          type: "RESERVATION_CANCELLED_MANUAL",
+          referenceId: reservation.id,
+        },
+        { shouldSendEmail: true, emailHtml: emailContent }
       );
     }
 
-    // If completed, send thank you notification
     if (status === "COMPLETED") {
-      await notificationService.sendReservationNotification(
-        reservation.customer.id,
-        "Service Completed",
-        `Thank you for using our service. Your ${reservation.service.name} has been completed.`,
-        "reservation",
-        reservation.id
+      const emailContent = `<h1>Terima Kasih, ${reservation.customer.name}!</h1><p>Layanan <strong>${reservation.service.name}</strong> Anda telah selesai. Kami harap Anda dan si kecil menikmati pengalamannya. Kami akan sangat menghargai jika Anda bersedia memberikan ulasan untuk layanan kami.</p>`;
+
+      await createNotificationForCustomer(
+        {
+          recipientId: reservation.customerId,
+          title: "Layanan Telah Selesai",
+          message: `Terima kasih! Layanan ${reservation.service.name} Anda telah selesai.`,
+          type: "RESERVATION_COMPLETED",
+          referenceId: reservation.id,
+        },
+        { shouldSendEmail: true, emailHtml: emailContent }
       );
     }
-
     return res.status(200).json({
       success: true,
       message: "Reservation status updated successfully",
@@ -770,35 +810,50 @@ export const handlePaymentCallback = async (req, res) => {
         `[CALLBACK_DB_UPDATE_DONE] DB update finished for ref: ${reference}`
       );
 
-      // --- KIRIM NOTIFIKASI TANPA MENUNGGU (FIRE-AND-FORGET) ---
+      // --- NOTIFIKASI BARU (MENGGANTIKAN YANG LAMA) ---
       console.log(
         `[CALLBACK_NOTIFICATION] Dispatching notifications for ref: ${reference}`
       );
       const serviceName = payment.reservation.service?.name || "layanan";
+      const customerId = payment.reservation.customer.id;
+      const customerEmail = payment.reservation.customer.email;
+      const reservationId = payment.reservation.id;
+
       if (newReservationStatus === "CONFIRMED") {
-        notificationService
-          .sendReservationNotification(
-            payment.reservation.customer.id,
-            "Pembayaran Berhasil & Reservasi Dikonfirmasi",
-            `Pembayaran Anda untuk ${serviceName} telah kami terima. Reservasi Anda sekarang telah dikonfirmasi.`,
-            "payment",
-            payment.reservation.id
-          )
-          .catch((err) =>
-            console.error(`[NOTIFICATION_ERROR] for ref ${reference}:`, err)
-          );
+        await createNotificationForAllOwners(
+          {
+            title: `Pembayaran Lunas`,
+            message: `Pembayaran untuk ${serviceName} dari ${customer.name} telah dikonfirmasi.`,
+            type: "PAYMENT_SUCCESS",
+            referenceId: reservationId,
+          },
+          { sendPush: true }
+        );
+
+        // Notifikasi untuk CUSTOMER
+        await createNotificationForCustomer(
+          {
+            recipientId: customer.id, // Langsung pakai ID customer
+            title: "Pembayaran Berhasil!",
+            message: `Reservasi Anda untuk ${serviceName} telah dikonfirmasi. Sampai jumpa!`,
+            type: "PAYMENT_SUCCESS",
+            referenceId: reservationId,
+          },
+          { sendPush: true }
+        );
       } else if (["EXPIRED", "CANCELLED"].includes(newReservationStatus)) {
-        notificationService
-          .sendReservationNotification(
-            payment.reservation.customer.id,
-            "Reservasi Dibatalkan",
-            `Reservasi Anda untuk ${serviceName} telah dibatalkan karena masalah pembayaran (${status}).`,
-            "payment",
-            payment.reservation.id
-          )
-          .catch((err) =>
-            console.error(`[NOTIFICATION_ERROR] for ref ${reference}:`, err)
-          );
+        const emailContent = `<h1>Halo,</h1><p>Reservasi Anda untuk layanan <strong>${serviceName}</strong> (ID: ${reservationId}) telah dibatalkan karena status pembayaran: ${status}.</p>`;
+
+        await createNotificationForCustomer(
+          {
+            recipientId: customerId,
+            title: "Reservasi Dibatalkan",
+            message: `Reservasi Anda untuk ${serviceName} telah dibatalkan.`,
+            type: "RESERVATION_CANCELLED_AUTO",
+            referenceId: reservationId,
+          },
+          { shouldSendEmail: true, emailHtml: emailContent }
+        );
       }
     }
 
@@ -1487,34 +1542,6 @@ export const createManualReservation = async (req, res) => {
       isPaymentPaidProcessed: isPaymentPaid,
     });
 
-    // SEND NOTIFICATIONS - non-blocking
-    try {
-      // Send notification to staff about new manual booking
-      const sessionDateTime = new Date(
-        result.reservation.session.timeSlot.operatingSchedule.date
-      );
-
-      await notificationService.sendNotificationToStaff(
-        session.staffId,
-        "New Manual Booking",
-        `A new manual booking has been created for ${
-          service.name
-        } on ${formatDate(sessionDateTime)}. Status: ${
-          result.reservation.status
-        }`,
-        "reservation",
-        result.reservation.id
-      );
-
-      console.log("[MANUAL RESERVATION] Staff notification sent");
-    } catch (notificationError) {
-      console.warn(
-        "[MANUAL RESERVATION] Failed to send notification:",
-        notificationError.message
-      );
-      // Don't fail the request for notification errors
-    }
-
     // PREPARE RESPONSE DATA
     const responseData = {
       reservation: {
@@ -1888,14 +1915,6 @@ export const createManualPayment = async (req, res) => {
         paymentData
       );
 
-      // Notify owner about new payment proof
-      await notificationService.sendNotificationToOwner(
-        "Updated Payment Proof",
-        `A new payment proof has been uploaded for reservation #${reservation.id}`,
-        "payment",
-        reservation.id
-      );
-
       return res.status(200).json({
         success: true,
         message: "Payment proof uploaded successfully",
@@ -1923,14 +1942,6 @@ export const createManualPayment = async (req, res) => {
         reservationId,
         ...paymentData,
       });
-
-      // Notify owner about new payment proof
-      await notificationService.sendNotificationToOwner(
-        "New Payment Proof",
-        `A payment proof has been uploaded for reservation #${reservation.id}`,
-        "payment",
-        reservation.id
-      );
 
       return res.status(201).json({
         success: true,
@@ -2010,25 +2021,6 @@ export const verifyManualPayment = async (req, res) => {
     // If rejected, free up the session
     if (!isVerified) {
       await updateSessionBookingStatus(payment.reservation.sessionId, false);
-    }
-
-    // Send notification to customer
-    if (isVerified) {
-      await notificationService.sendReservationNotification(
-        payment.reservation.customerId,
-        "Payment Verified",
-        "Your payment has been verified and your reservation is now confirmed.",
-        "payment",
-        payment.reservationId
-      );
-    } else {
-      await notificationService.sendReservationNotification(
-        payment.reservation.customerId,
-        "Payment Rejected",
-        "Your payment has been rejected. Please contact us for more information.",
-        "payment",
-        payment.reservationId
-      );
     }
 
     return res.status(200).json({

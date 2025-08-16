@@ -32,6 +32,74 @@ export const initCronJobs = (apiBaseUrl) => {
 
   console.log("[CRON] Schedule generation job initialized");
 };
+cron.schedule(
+  "0 9 * * *",
+  async () => {
+    console.log(
+      "[CRON_REMINDER] Running H-1 reservation reminder job at",
+      new Date().toISOString()
+    );
+
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const startOfTomorrow = new Date(tomorrow.setHours(0, 0, 0, 0));
+    const endOfTomorrow = new Date(tomorrow.setHours(23, 59, 59, 999));
+
+    try {
+      const upcomingReservations = await prisma.reservation.findMany({
+        where: {
+          status: "CONFIRMED",
+          session: {
+            timeSlot: {
+              startTime: {
+                gte: startOfTomorrow,
+                lte: endOfTomorrow,
+              },
+            },
+          },
+        },
+        include: {
+          customer: {
+            select: { id: true, oneSignalPlayerId: true },
+          },
+          service: {
+            select: { name: true },
+          },
+          session: {
+            include: {
+              timeSlot: true,
+            },
+          },
+        },
+      });
+
+      console.log(
+        `[CRON_REMINDER] Found ${upcomingReservations.length} reservations for tomorrow.`
+      );
+
+      for (const reservation of upcomingReservations) {
+        const time = new Date(
+          reservation.session.timeSlot.startTime
+        ).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+
+        await notificationService.sendPushNotificationToCustomer(
+          reservation.customer.id,
+          "Pengingat Jadwal Spa Besok",
+          `Jangan lupa, jadwal spa Anda untuk layanan ${reservation.service.name} adalah besok pukul ${time}.`,
+          { reservationId: reservation.id }
+        );
+      }
+    } catch (error) {
+      console.error("[CRON_REMINDER_ERROR] Failed to send reminders:", error);
+    }
+  },
+  {
+    scheduled: true,
+    timezone: "Asia/Jakarta", // Penting untuk zona waktu
+  }
+);
+
+console.log("[CRON] H-1 Reservation reminder job initialized.");
 
 /**
  * Run the schedule generation manually

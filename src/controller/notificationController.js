@@ -1,0 +1,60 @@
+// src/controller/notificationController.js
+import prisma from "../config/db.js";
+
+export const getNotifications = async (req, res) => {
+  const userId = req.customer?.id || req.owner?.id;
+  const userType = req.customer ? "customer" : "owner";
+
+  if (!userId) {
+    return res
+      .status(401)
+      .json({ success: false, message: "Unauthorized: Please log in." });
+  }
+
+  try {
+    const notifications = await prisma.notification.findMany({
+      where: {
+        recipientId: userId,
+        recipientType: userType,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+
+    res.status(200).json({ success: true, data: notifications });
+  } catch (error) {
+    console.error("[GET_NOTIFICATIONS_ERROR]", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch notifications." });
+  }
+};
+
+export const markAsRead = async (req, res) => {
+  const { notificationId } = req.params;
+  const userId = req.customer?.id || req.owner?.id;
+
+  if (!userId) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+
+  try {
+    const notification = await prisma.notification.findUnique({
+      where: { id: notificationId },
+    });
+
+    // Pastikan notifikasi ini milik user yang sedang login
+    if (!notification || notification.recipientId !== userId) {
+      return res.status(404).json({ message: "Notification not found" });
+    }
+
+    const updatedNotification = await prisma.notification.update({
+      where: { id: notificationId },
+      data: { isRead: true },
+    });
+
+    res.status(200).json({ success: true, data: updatedNotification });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to update notification." });
+  }
+};

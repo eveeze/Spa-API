@@ -272,3 +272,46 @@ export const callbackMiddleware = (req, res, next) => {
 
   next();
 };
+
+export const combinedAuth = async (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    // Jika tidak ada token, langsung lanjutkan.
+    // Controller yang akan memutuskan apakah user wajib login atau tidak.
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return next();
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Cek role dari dalam token
+    if (decoded.role === "customer") {
+      const customer = await prisma.customer.findUnique({
+        where: { id: decoded.id },
+        select: { id: true, email: true, name: true },
+      });
+      if (customer) {
+        req.customer = customer; // Pasang data customer di request
+      }
+    } else if (decoded.role === "owner") {
+      // Asumsi role di token owner adalah 'owner'
+      const owner = await prisma.owner.findUnique({
+        where: { id: decoded.id },
+        select: { id: true, email: true, name: true },
+      });
+      if (owner) {
+        req.owner = owner; // Pasang data owner di request
+      }
+    }
+
+    next(); // Lanjutkan ke controller
+  } catch (error) {
+    // Jika token error (kadaluarsa/invalid), kita tidak stop request,
+    // tapi cukup pastikan tidak ada data user yang terpasang.
+    // Controller akan menangani jika user tidak ditemukan.
+    console.error("[COMBINED AUTH MIDDLEWARE ERROR]:", error.name);
+    next();
+  }
+};

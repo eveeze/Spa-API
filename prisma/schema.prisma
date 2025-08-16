@@ -12,18 +12,20 @@ datasource db {
 
 // Model untuk pemilik (owner)
 model Owner {
-  id          String   @id @default(uuid())
-  name        String
-  email       String   @unique
-  phoneNumber String
-  password    String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                String   @id @default(uuid())
+  oneSignalPlayerId String?
+  name              String
+  email             String   @unique
+  phoneNumber       String
+  password          String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 }
 
 // Model untuk pelanggan
 model Customer {
   id                       String        @id @default(uuid())
+  oneSignalPlayerId        String?
   name                     String
   email                    String        @unique
   phoneNumber              String
