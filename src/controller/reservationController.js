@@ -1,4 +1,6 @@
 // src/controller/reservationController.js
+import pkg from "uuid";
+const { v4: uuidv4 } = pkg;
 import {
   createReservation,
   getReservationById,
@@ -34,6 +36,7 @@ import {
   createNotificationForCustomer,
 } from "../services/notificationService.js";
 import paymentScheduler from "../config/paymentScheduler.js";
+import { addDays } from "date-fns";
 /**
  * Get upcoming reservations
  * @param {Object} req - Express request object
@@ -814,11 +817,8 @@ export const handlePaymentCallback = async (req, res) => {
       console.log(
         `[CALLBACK_NOTIFICATION] Dispatching notifications for ref: ${reference}`
       );
-      const serviceName = payment.reservation.service?.name || "layanan";
-      const customerId = payment.reservation.customer.id;
-      const customerEmail = payment.reservation.customer.email;
-      const reservationId = payment.reservation.id;
-
+      const { customer, service, id: reservationId } = payment.reservation;
+      const serviceName = service?.name || "layanan";
       if (newReservationStatus === "CONFIRMED") {
         await createNotificationForAllOwners(
           {
@@ -830,10 +830,9 @@ export const handlePaymentCallback = async (req, res) => {
           { sendPush: true }
         );
 
-        // Notifikasi untuk CUSTOMER
         await createNotificationForCustomer(
           {
-            recipientId: customer.id, // Langsung pakai ID customer
+            recipientId: customer.id,
             title: "Pembayaran Berhasil!",
             message: `Reservasi Anda untuk ${serviceName} telah dikonfirmasi. Sampai jumpa!`,
             type: "PAYMENT_SUCCESS",
@@ -846,7 +845,7 @@ export const handlePaymentCallback = async (req, res) => {
 
         await createNotificationForCustomer(
           {
-            recipientId: customerId,
+            recipientId: customer.id,
             title: "Reservasi Dibatalkan",
             message: `Reservasi Anda untuk ${serviceName} telah dibatalkan.`,
             type: "RESERVATION_CANCELLED_AUTO",

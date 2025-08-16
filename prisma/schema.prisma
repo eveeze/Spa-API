@@ -42,7 +42,6 @@ model Customer {
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
   reservations             Reservation[]
-  ratings                  Rating[]
 }
 
 // Model untuk staff
@@ -88,7 +87,6 @@ model Service {
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   reservations  Reservation[]
-  ratings       Rating[]
   averageRating Float?
 }
 
@@ -152,14 +150,12 @@ model Session {
 
 // Rating layanan
 model Rating {
-  id         String   @id @default(uuid())
-  rating     Float // Rating 1-5
-  comment    String?
-  serviceId  String
-  service    Service  @relation(fields: [serviceId], references: [id])
-  customerId String
-  customer   Customer @relation(fields: [customerId], references: [id])
-  createdAt  DateTime @default(now())
+  id            String      @id @default(uuid())
+  rating        Float // Rating 1-5
+  comment       String?
+  createdAt     DateTime    @default(now())
+  reservationId String      @unique // Memastikan satu reservasi hanya bisa dirating sekali
+  reservation   Reservation @relation(fields: [reservationId], references: [id])
 }
 
 // Status reservasi
@@ -200,27 +196,30 @@ enum ReservationType {
 
 // Reservasi
 model Reservation {
-  id              String            @id @default(uuid())
-  reservationType ReservationType   @default(ONLINE)
-  customerId      String
-  customer        Customer          @relation(fields: [customerId], references: [id])
-  serviceId       String
-  service         Service           @relation(fields: [serviceId], references: [id])
-  staffId         String
-  staff           Staff             @relation(fields: [staffId], references: [id])
-  sessionId       String            @unique
-  session         Session           @relation(fields: [sessionId], references: [id])
-  notes           String? // Catatan khusus untuk reservasi
-  parentNames     String? // NEW: Parent names for manual reservations
-  babyName        String
-  babyAge         Int // Umur bayi dalam bulan
-  priceTierId     String? // ID price tier jika menggunakan layanan dengan price tiers
-  totalPrice      Float
-  status          ReservationStatus @default(PENDING)
-  createdByOwner  Boolean           @default(false) // Apakah dibuat oleh owner (manual)
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
-  payment         Payment?
+  id                   String            @id @default(uuid())
+  reservationType      ReservationType   @default(ONLINE)
+  customerId           String
+  customer             Customer          @relation(fields: [customerId], references: [id])
+  serviceId            String
+  service              Service           @relation(fields: [serviceId], references: [id])
+  staffId              String
+  staff                Staff             @relation(fields: [staffId], references: [id])
+  sessionId            String            @unique
+  session              Session           @relation(fields: [sessionId], references: [id])
+  notes                String? // Catatan khusus untuk reservasi
+  parentNames          String? // NEW: Parent names for manual reservations
+  babyName             String
+  babyAge              Int // Umur bayi dalam bulan
+  priceTierId          String? // ID price tier jika menggunakan layanan dengan price tiers
+  totalPrice           Float
+  status               ReservationStatus @default(PENDING)
+  createdByOwner       Boolean           @default(false) // Apakah dibuat oleh owner (manual)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  payment              Payment?
+  rating               Rating?
+  ratingToken          String?           @unique // Jadikan opsional
+  ratingTokenExpiresAt DateTime? // Tambahkan field ini
 }
 
 // Pembayaran

@@ -20,6 +20,7 @@ import sessionRoutes from "./routes/sessionRoutes.js";
 import reservationRoutes from "./routes/reservationRoutes.js";
 import schedulerRoutes from "./routes/schedulerRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
+import ratingRoutes from "./routes/ratingRoutes.js";
 dotenv.config();
 
 const app = express();
@@ -76,6 +77,7 @@ app.use("/api/session", sessionRoutes);
 app.use("/api/reservations", reservationRoutes);
 app.use("/api/scheduler", schedulerRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/ratings", ratingRoutes);
 const PORT = process.env.PORT || 5000;
 
 app.get("/", (req, res) => {
