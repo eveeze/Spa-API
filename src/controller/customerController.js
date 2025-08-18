@@ -8,7 +8,7 @@ import {
   findPelangganById,
   updatePelanggan,
 } from "../repository/customerRepository.js";
-import { generateOTP, sendOtp } from "../utils/email.js";
+import { generateOTP, sendOtp, sendEmailWithTemplate } from "../utils/email.js";
 import prisma from "../config/db.js";
 const register = async (req, res) => {
   try {
@@ -88,7 +88,10 @@ const verifyOtp = async (req, res) => {
 const resendOtp = async (req, res) => {
   try {
     const { email } = req.body;
-    const customer = findPelangganByEmail(email);
+    const customer = await findPelangganByEmail(email);
+    if (!customer) {
+      return res.status(404).json({ message: "Email tidak ditemukan" });
+    }
     if (customer.isVerified) {
       return res.status(400).json({ message: "Akun sudah terverifikasi" });
     }
@@ -103,6 +106,7 @@ const resendOtp = async (req, res) => {
       },
     });
 
+    // Panggilan ini juga sudah benar dan tidak perlu diubah
     await sendOtp(email, otp);
     return res.status(200).json({ message: "OTP berhasil dikirim ulang" });
   } catch (err) {
@@ -171,10 +175,8 @@ const forgotPassword = async (req, res) => {
       return res.status(400).json({ message: "Akun belum terverifikasi" });
     }
 
-    // Generate OTP untuk reset password
     const otp = generateOTP();
 
-    // Update OTP di database
     await prisma.customer.update({
       where: { email },
       data: {
@@ -184,8 +186,16 @@ const forgotPassword = async (req, res) => {
       },
     });
 
-    // Kirim OTP ke email
-    await sendOtp(email, otp, "Reset Password");
+    // Ganti pemanggilan `sendOtp` dengan `sendEmailWithTemplate`
+    await sendEmailWithTemplate(
+      email,
+      "OTP Reset Password",
+      "resetPassword", // Gunakan template baru
+      {
+        customerName: customer.name,
+        OTP: otp,
+      }
+    );
 
     return res
       .status(200)
@@ -195,7 +205,6 @@ const forgotPassword = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
-
 // Verify Reset Password OTP
 const verifyResetOtp = async (req, res) => {
   try {

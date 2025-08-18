@@ -1,7 +1,6 @@
 import prisma from "../config/db.js";
 import oneSignalClient from "../config/oneSignalClient.js";
-import { sendEmail } from "../utils/email.js";
-
+import { sendEmailWithTemplate } from "../utils/email.js";
 /**
  * [HELPER INTERNAL] Fungsi dasar untuk mengirim Push Notification ke OneSignal.
  * @private
@@ -41,22 +40,22 @@ const _sendPushNotification = async (playerIds, title, message, data = {}) => {
  */
 export const createNotificationForCustomer = async (
   notificationData,
-  options = {}
+  // UBAH: Opsi email sekarang lebih terstruktur
+  options = { sendPush: false, emailOptions: null }
 ) => {
   const {
     sendPush = false,
-    shouldSendEmail = false,
-    emailHtml = "",
-    pushMessage = "",
+    // UBAH: Ambil emailOptions dari parameter
+    emailOptions = null,
   } = options;
   const { recipientId, title, message, type, referenceId } = notificationData;
 
-  // 1. Simpan notifikasi ke database untuk customer ini.
+  // 1. Simpan notifikasi ke database (tidak ada perubahan)
   try {
     await prisma.notification.create({
       data: {
         recipientId,
-        recipientType: "customer", // Hardcoded untuk customer
+        recipientType: "customer",
         title,
         message,
         type,
@@ -74,7 +73,7 @@ export const createNotificationForCustomer = async (
   }
 
   // 2. Kirim notifikasi real-time jika diminta.
-  if (!sendPush && !shouldSendEmail) return;
+  if (!sendPush && !emailOptions) return;
 
   const customer = await prisma.customer.findUnique({
     where: { id: recipientId },
@@ -92,13 +91,26 @@ export const createNotificationForCustomer = async (
     await _sendPushNotification(
       [customer.oneSignalPlayerId],
       title,
-      pushMessage || message,
+      message, // pushMessage bisa ditambahkan di sini jika perlu
       { referenceId }
     );
   }
 
-  if (shouldSendEmail && customer.email) {
-    await sendEmail(customer.email, title, emailHtml || message);
+  // UBAH: Logika pengiriman email menggunakan sistem template
+  if (emailOptions && customer.email) {
+    const { templateName, templateData } = emailOptions;
+    if (templateName && templateData) {
+      await sendEmailWithTemplate(
+        customer.email,
+        title, // Judul notifikasi menjadi subjek email
+        templateName,
+        templateData
+      );
+    } else {
+      console.warn(
+        "[EMAIL_SEND_WARN] emailOptions diberikan tapi tidak lengkap (membutuhkan templateName dan templateData)."
+      );
+    }
   }
 };
 

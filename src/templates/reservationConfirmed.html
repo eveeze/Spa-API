@@ -1,0 +1,94 @@
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reservasi Dikonfirmasi - Ema Mom Kids Baby Spa</title>
+    <style>
+        body {
+            font-family: "Arial", sans-serif;
+            background-color: #e6f7ff;
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            text-align: center;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #cce7ff;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 26px;
+            color: #0073e6;
+        }
+
+        .content {
+            padding: 20px 0;
+        }
+
+        .content p {
+            font-size: 16px;
+            color: #555555;
+            line-height: 1.6;
+        }
+
+        .status-box {
+            text-align: center;
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #e6ffed;
+            border: 1px solid #cce7d4;
+            border-radius: 4px;
+        }
+
+        .status-box h2 {
+            margin: 0;
+            font-size: 24px;
+            font-weight: bold;
+            color: #28a745;
+        }
+
+        .footer {
+            text-align: center;
+            padding-top: 20px;
+            border-top: 1px solid #cce7ff;
+            font-size: 14px;
+            color: #777777;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Ema Mom Kids Baby Spa</h1>
+        </div>
+        <div class="content">
+            <p>Halo <strong>{{customerName}}</strong>,</p>
+            <p>
+                Kabar baik! Pembayaran Anda telah kami terima dan reservasi untuk layanan
+                <strong>{{serviceName}}</strong> (ID: #{{reservationId}}) sudah berhasil.
+            </p>
+            <div class="status-box">
+                <h2>RESERVASI DIKONFIRMASI</h2>
+            </div>
+            <p>Kami sangat menantikan kedatangan Anda dan si kecil. Sampai jumpa!</p>
+        </div>
+        <div class="footer">
+            <p>Salam hangat,<br />Ema Mom Kids Baby Spa</p>
+        </div>
+    </div>
+</body>
+
+</html>

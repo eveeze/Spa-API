@@ -3,7 +3,7 @@ import cron from "node-cron";
 import axios from "axios";
 import dotenv from "dotenv";
 import crypto from "node:crypto"; // <-- TAMBAHKAN BARIS INI
-
+import prisma from "../config/db.js";
 dotenv.config();
 
 /**

@@ -17,10 +17,35 @@ const transporter = nodemailer.createTransport({
 });
 
 /**
- * Fungsi baru yang lebih generik untuk mengirim email.
- * @param {string} to - Alamat email tujuan
- * @param {string} subject - Judul email
- * @param {string} html - Konten email dalam format HTML
+ * Merender template HTML dengan data dinamis.
+ * @param {string} templateName - Nama file template (tanpa .html).
+ * @param {object} data - Objek berisi data untuk menggantikan placeholder.
+ * @returns {string} Konten HTML yang sudah dirender.
+ */
+const renderTemplate = (templateName, data) => {
+  // Path menuju folder templates, keluar satu level dari 'utils'
+  const templatePath = join(
+    __dirname,
+    "..",
+    "templates",
+    `${templateName}.html`
+  );
+  let html = fs.readFileSync(templatePath, "utf8");
+
+  // Ganti semua placeholder {{key}} dengan value dari objek data
+  for (const key in data) {
+    const regex = new RegExp(`{{${key}}}`, "g");
+    html = html.replace(regex, data[key]);
+  }
+
+  return html;
+};
+
+/**
+ * Fungsi dasar untuk mengirim email.
+ * @param {string} to - Alamat email tujuan.
+ * @param {string} subject - Judul email.
+ * @param {string} html - Konten email dalam format HTML.
  */
 export const sendEmail = async (to, subject, html) => {
   try {
@@ -39,20 +64,34 @@ export const sendEmail = async (to, subject, html) => {
   }
 };
 
+/**
+ * Fungsi baru untuk mengirim email menggunakan template.
+ * @param {string} to - Alamat email tujuan.
+ * @param {string} subject - Judul email.
+ * @param {string} templateName - Nama file template di folder /templates.
+ * @param {object} data - Objek data untuk mengisi template.
+ */
+export const sendEmailWithTemplate = async (
+  to,
+  subject,
+  templateName,
+  data
+) => {
+  const htmlContent = renderTemplate(templateName, data);
+  await sendEmail(to, subject, htmlContent);
+};
+
 // Fungsi generateOTP tetap sama
 export const generateOTP = () => {
   return Math.floor(1000 + Math.random() * 9000).toString();
 };
 
-// Fungsi sendOtp sekarang bisa menggunakan fungsi sendEmail yang baru
+// Fungsi sendOtp sekarang menggunakan sistem template yang baru
 export const sendOtp = async (email, otp) => {
-  const templatePath = join(__dirname, "email.html");
-  let htmlTemplate = fs.readFileSync(templatePath, "utf8");
-  htmlTemplate = htmlTemplate.replace("{{OTP}}", otp);
-
-  // Menggunakan fungsi generik sendEmail
-  await sendEmail(email, "Verifikasi OTP", htmlTemplate);
+  await sendEmailWithTemplate(email, "Verifikasi OTP", "otpVerification", {
+    OTP: otp,
+  });
 };
 
-// Pastikan transporter juga diekspor jika masih dibutuhkan di tempat lain
+// Ekspor transporter jika masih dibutuhkan
 export { transporter };
