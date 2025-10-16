@@ -251,3 +251,41 @@ export const getTopPerformingStaff = async (limit = 5, startDate, endDate) => {
     completedServices: s._count.staffId,
   }));
 };
+
+/**
+ * [BARU] Mengambil statistik rating layanan.
+ * @param {number} limit - Jumlah layanan yang ingin ditampilkan.
+ */
+export const getServiceRatingStats = async (limit = 5) => {
+  // Ambil semua layanan yang memiliki averageRating (sudah pernah dirating)
+  const servicesWithRating = await prisma.service.findMany({
+    where: {
+      averageRating: {
+        not: null,
+      },
+    },
+    select: {
+      id: true,
+      name: true,
+      averageRating: true,
+    },
+  });
+
+  // Urutkan untuk mendapatkan yang tertinggi dan terendah
+  const sortedServices = servicesWithRating.sort(
+    (a, b) => b.averageRating - a.averageRating
+  );
+
+  const topRated = sortedServices.slice(0, limit);
+  const lowestRated = sortedServices.slice(-limit).reverse(); // Ambil dari akhir lalu balik urutannya
+
+  const overallAverage =
+    servicesWithRating.reduce((sum, s) => sum + s.averageRating, 0) /
+      servicesWithRating.length || 0;
+
+  return {
+    overallAverageRating: parseFloat(overallAverage.toFixed(2)),
+    topRatedServices: topRated,
+    lowestRatedServices: lowestRated,
+  };
+};

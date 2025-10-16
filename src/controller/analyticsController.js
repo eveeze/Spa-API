@@ -6,6 +6,7 @@ import {
   getTopPerformingServices,
   getTopPerformingStaff,
   getReservationStats,
+  getServiceRatingStats, // <-- Impor fungsi baru
 } from "../repository/analyticsRepository.js";
 import { startOfDay, endOfDay, subDays } from "date-fns";
 
@@ -43,13 +44,19 @@ export const getAnalyticsDetails = async (req, res) => {
     const startDate = startOfDay(subDays(endDate, days - 1));
 
     // Panggil semua fungsi repository secara paralel untuk efisiensi
-    const [revenueChart, topServices, topStaff, reservationStats] =
-      await Promise.all([
-        getRevenueChartData(days),
-        getTopPerformingServices(5, startDate, endDate),
-        getTopPerformingStaff(5, startDate, endDate),
-        getReservationStats(startDate, endDate),
-      ]);
+    const [
+      revenueChart,
+      topServices,
+      topStaff,
+      reservationStats,
+      ratingStats, // <-- Panggil fungsi baru
+    ] = await Promise.all([
+      getRevenueChartData(days),
+      getTopPerformingServices(5, startDate, endDate),
+      getTopPerformingStaff(5, startDate, endDate),
+      getReservationStats(startDate, endDate),
+      getServiceRatingStats(5), // <-- Tambahkan ini
+    ]);
 
     res.status(200).json({
       success: true,
@@ -63,6 +70,7 @@ export const getAnalyticsDetails = async (req, res) => {
         revenueChartData: revenueChart,
         topPerformingServices: topServices,
         topPerformingStaff: topStaff,
+        ratingStats: ratingStats, // <-- Tambahkan hasilnya ke response
       },
     });
   } catch (error) {
