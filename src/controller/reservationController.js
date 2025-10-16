@@ -16,6 +16,7 @@ import {
   getUpcomingReservations,
   updatePaymentProof,
   updateReservationDetails,
+  rescheduleReservation,
 } from "../repository/reservationRepository.js";
 import {
   getSessionById,
@@ -35,8 +36,18 @@ import {
   createNotificationForAllOwners,
   createNotificationForCustomer,
 } from "../services/notificationService.js";
-import paymentScheduler from "../config/paymentScheduler.js";
 import { addDays } from "date-fns";
+
+const MINIMUM_HOURS_BEFORE_RESCHEDULE = parseInt(
+  process.env.MINIMUM_HOURS_RESCHEDULE || "24",
+  10
+);
+const MAX_RESCHEDULE_COUNT = parseInt(process.env.MAX_RESCHEDULE || "2", 10);
+const generateRatingToken = () => {
+  const token = crypto.randomBytes(20).toString("hex");
+  const expiresAt = addDays(new Date(), 3);
+  return { token, expiresAt };
+};
 /**
  * Get upcoming reservations
  * @param {Object} req - Express request object
@@ -280,11 +291,6 @@ export const createNewReservation = async (req, res) => {
       tripayResponse: tripayTransaction,
       tripayInstructions: tripayTransaction.instructions || {},
     });
-
-    paymentScheduler.schedulePaymentExpiry(
-      updatedPayment.id,
-      updatedPayment.expiryDate
-    );
 
     // Notifikasi untuk SEMUA OWNER: Simpan ke DB & Kirim Push
     await createNotificationForAllOwners(
@@ -533,7 +539,7 @@ export const updateReservation = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    // Validate status
+    // 1. Validasi Input (Tidak ada perubahan)
     const validStatuses = [
       "CONFIRMED",
       "IN_PROGRESS",
@@ -547,7 +553,7 @@ export const updateReservation = async (req, res) => {
       });
     }
 
-    // Get reservation
+    // 2. Ambil data reservasi awal untuk validasi
     const reservation = await getReservationById(id);
 
     if (!reservation) {
@@ -557,7 +563,7 @@ export const updateReservation = async (req, res) => {
       });
     }
 
-    // Validate status transition
+    // 3. Validasi transisi status (Tidak ada perubahan)
     if (!isValidStatusTransition(reservation.status, status)) {
       return res.status(400).json({
         success: false,
@@ -565,12 +571,39 @@ export const updateReservation = async (req, res) => {
       });
     }
 
-    // Update reservation status
-    const updatedReservation = await updateReservationStatus(id, status);
+    // 4. Siapkan "paket" data yang akan di-update
+    const updateData = {
+      status: status,
+    };
 
+    // 5. Tambahkan data token rating secara kondisional ke dalam "paket"
+    if (status === "COMPLETED" && reservation.reservationType === "MANUAL") {
+      const { token, expiresAt } = generateRatingToken();
+      updateData.ratingToken = token;
+      updateData.ratingTokenExpiresAt = expiresAt;
+      console.log(
+        `Rating token will be generated for manual reservation #${id}`
+      );
+    }
+
+    const updatedReservation = await prisma.reservation.update({
+      where: { id },
+      data: updateData,
+      include: {
+        customer: {
+          select: { id: true, name: true, email: true, phoneNumber: true },
+        },
+        service: true,
+        staff: true,
+        session: true,
+        payment: true,
+        rating: true,
+      },
+    });
+
+    // 7. Jalankan logika tambahan setelah update berhasil (Notifikasi, dll)
     if (status === "CANCELLED") {
       await updateSessionBookingStatus(reservation.sessionId, false);
-
       await createNotificationForCustomer(
         {
           recipientId: reservation.customerId,
@@ -614,6 +647,8 @@ export const updateReservation = async (req, res) => {
         }
       );
     }
+
+    // 8. Kirim respons sukses
     return res.status(200).json({
       success: true,
       message: "Reservation status updated successfully",
@@ -682,7 +717,118 @@ export const updateReservationDetailsHandler = async (req, res) => {
 };
 
 /**
- * handlePaymentCallback - VERSI FINAL YANG DIOPTIMALKAN
+ * Reschedule an existing reservation with business rules applied.
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ */
+export const rescheduleReservationHandler = async (req, res) => {
+  try {
+    const { id: reservationId } = req.params;
+    const { newSessionId } = req.body;
+
+    // 1. Validasi Input Dasar
+    if (!newSessionId) {
+      return res.status(400).json({
+        success: false,
+        message: "ID Sesi baru (newSessionId) wajib diisi.",
+      });
+    }
+
+    // 2. Ambil Data Reservasi yang Akan Diubah
+    const reservation = await getReservationById(reservationId);
+    if (!reservation) {
+      return res.status(404).json({
+        success: false,
+        message: "Reservasi tidak ditemukan.",
+      });
+    }
+
+    // 3. Otorisasi: Pastikan user berhak mengubah reservasi ini
+    if (req.customer && reservation.customerId !== req.customer.id) {
+      return res.status(403).json({
+        success: false,
+        message: "Anda tidak berhak mengubah reservasi ini.",
+      });
+    }
+
+    // 4. PENERAPAN ATURAN BISNIS (Hanya untuk Customer)
+    // Owner dibebaskan dari aturan ini agar memiliki fleksibilitas penuh.
+    if (req.customer) {
+      // ATURAN 1: BATAS WAKTU MINIMUM UNTUK RESCHEDULE
+      const sessionStartTime = new Date(reservation.session.timeSlot.startTime);
+      const now = new Date();
+      const hoursDifference =
+        (sessionStartTime.getTime() - now.getTime()) / (1000 * 60 * 60);
+
+      if (hoursDifference < MINIMUM_HOURS_BEFORE_RESCHEDULE) {
+        return res.status(400).json({
+          success: false,
+          message: `Jadwal tidak dapat diubah kurang dari ${MINIMUM_HOURS_BEFORE_RESCHEDULE} jam sebelum waktu reservasi.`,
+        });
+      }
+
+      // ATURAN 2: BATAS FREKUENSI/JUMLAH RESCHEDULE
+      if (reservation.rescheduleCount >= MAX_RESCHEDULE_COUNT) {
+        return res.status(400).json({
+          success: false,
+          message: `Anda telah mencapai batas maksimal reschedule (${MAX_RESCHEDULE_COUNT} kali) untuk reservasi ini.`,
+        });
+      }
+    }
+
+    // 5. Panggil Logika Inti di Repository untuk memproses perubahan di database
+    const updatedReservation = await rescheduleReservation(
+      reservationId,
+      newSessionId
+    );
+
+    // 6. Kirim Notifikasi setelah berhasil
+    // Notifikasi untuk Customer
+    await createNotificationForCustomer(
+      {
+        recipientId: updatedReservation.customer.id,
+        title: "Reservasi Berhasil Dijadwalkan Ulang",
+        message: `Reservasi Anda untuk layanan ${updatedReservation.service.name} telah diubah ke jadwal baru.`,
+        type: "RESERVATION_RESCHEDULED",
+        referenceId: updatedReservation.id,
+      },
+      { sendPush: true }
+    );
+
+    // Notifikasi untuk Semua Owner
+    await createNotificationForAllOwners(
+      {
+        title: "Sebuah Reservasi Diubah",
+        message: `Reservasi oleh ${updatedReservation.customer.name} telah berhasil dijadwalkan ulang.`,
+        type: "RESERVATION_RESCHEDULED",
+        referenceId: updatedReservation.id,
+      },
+      { sendPush: true }
+    );
+
+    // 7. Kirim Respons Sukses ke Client
+    return res.status(200).json({
+      success: true,
+      message: "Reservasi berhasil dijadwalkan ulang.",
+      data: updatedReservation,
+    });
+  } catch (error) {
+    console.error("[RESCHEDULE RESERVATION ERROR]:", error);
+
+    // Memberikan pesan error yang lebih spesifik jika sesi sudah dipesan orang lain
+    const isConflictError = error.message
+      .toLowerCase()
+      .includes("sudah dipesan");
+
+    return res.status(isConflictError ? 409 : 500).json({
+      success: false,
+      message: error.message || "Gagal menjadwalkan ulang reservasi.",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
+/**
  * Merespons callback dari Tripay dengan cepat untuk menghindari timeout,
  * dan menjalankan tugas yang lama (notifikasi) di latar belakang.
  * @param {Object} req - Express request object
@@ -765,19 +911,16 @@ export const handlePaymentCallback = async (req, res) => {
 
     switch (status.toUpperCase()) {
       case "PAID":
-        paymentScheduler.cancelPaymentExpiry(payment.id);
         newPaymentStatus = "PAID";
         newReservationStatus = "CONFIRMED";
         break;
       case "EXPIRED":
-        paymentScheduler.cancelPaymentExpiry(payment.id);
         newPaymentStatus = "EXPIRED";
         newReservationStatus = "EXPIRED";
         shouldFreeSession = true;
         break;
       case "FAILED":
       case "REFUND":
-        paymentScheduler.cancelPaymentExpiry(payment.id);
         newPaymentStatus = status.toUpperCase();
         newReservationStatus = "CANCELLED";
         shouldFreeSession = true;

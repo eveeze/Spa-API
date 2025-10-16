@@ -1,4 +1,5 @@
-<html lang="en">
+<!DOCTYPE html>
+<html lang="id">
 
 <head>
     <meta charset="UTF-8" />
@@ -7,61 +8,82 @@
     <style>
         body {
             font-family: "Arial", sans-serif;
-            background-color: #e6f7ff;
+            background-color: #fff2f2;
+            /* Warna latar belakang yang lembut */
             margin: 0;
             padding: 0;
+            color: #333;
         }
 
         .container {
             max-width: 600px;
             margin: 20px auto;
             background-color: #ffffff;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            padding: 25px;
+            border-radius: 10px;
+            border: 1px solid #ffcccc;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
         }
 
         .header {
             text-align: center;
             padding-bottom: 20px;
-            border-bottom: 1px solid #cce7ff;
+            border-bottom: 2px solid #ffdddd;
         }
 
         .header h1 {
             margin: 0;
-            font-size: 26px;
-            color: #0073e6;
+            font-size: 28px;
+            color: #d9534f;
+            /* Warna merah untuk pembatalan */
         }
 
         .content {
-            padding: 20px 0;
+            padding: 25px 0;
+            text-align: center;
         }
 
         .content p {
             font-size: 16px;
             color: #555555;
-            line-height: 1.6;
+            line-height: 1.7;
         }
 
         .reason-box {
-            margin: 20px 0;
+            background-color: #f9f9f9;
+            border-left: 4px solid #d9534f;
             padding: 15px;
-            background-color: #fff3f3;
-            border: 1px solid #f8d7da;
-            border-radius: 4px;
+            margin: 20px 0;
+            text-align: left;
         }
 
         .reason-box p {
-            color: #721c24;
             margin: 0;
+            font-style: italic;
+        }
+
+        .button-container {
+            text-align: center;
+            margin: 30px 0;
+        }
+
+        .button {
+            background-color: #0073e6;
+            color: white !important;
+            padding: 14px 28px;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+            font-size: 16px;
+            display: inline-block;
         }
 
         .footer {
             text-align: center;
             padding-top: 20px;
-            border-top: 1px solid #cce7ff;
+            border-top: 1px solid #eee;
             font-size: 14px;
-            color: #777777;
+            color: #888;
         }
     </style>
 </head>
@@ -69,21 +91,29 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Ema Mom Kids Baby Spa</h1>
+            <h1>Reservasi Dibatalkan</h1>
         </div>
         <div class="content">
             <p>Halo <strong>{{customerName}}</strong>,</p>
             <p>
-                Dengan hormat kami memberitahukan bahwa reservasi Anda untuk layanan <strong>{{serviceName}}</strong>
-                (ID: #{{reservationId}}) telah <strong>dibatalkan</strong>.
+                Dengan berat hati kami informasikan bahwa reservasi Anda untuk layanan
+                <strong>{{serviceName}}</strong> (ID: {{reservationId}}) telah
+                dibatalkan secara otomatis.
             </p>
             <div class="reason-box">
                 <p><strong>Alasan:</strong> {{reason}}</p>
             </div>
-            <p>Jika Anda memiliki pertanyaan atau ingin membuat reservasi baru, jangan ragu untuk menghubungi kami.</p>
+            <p>
+                Namun, jangan khawatir! Anda selalu dapat membuat reservasi baru kapan
+                saja. Silakan kunjungi kembali website kami untuk memilih jadwal yang
+                tersedia.
+            </p>
+            <div class="button-container">
+                <a href="https://yourwebsite.com" class="button">Buat Reservasi Baru</a>
+            </div>
         </div>
         <div class="footer">
-            <p>Salam hangat,<br />Ema Mom Kids Baby Spa</p>
+            <p>Salam hangat,<br />Tim Ema Mom Kids Baby Spa</p>
         </div>
     </div>
 </body>

@@ -933,3 +933,86 @@ export const getUpcomingReservations = async (options = {}) => {
     },
   };
 };
+
+/**
+ * Reschedules a reservation to a new session.
+ * This is an atomic transaction.
+ * @param {String} reservationId - The ID of the reservation to reschedule.
+ * @param {String} newSessionId - The ID of the new session.
+ * @returns {Promise<Object>} The updated reservation object.
+ */
+export const rescheduleReservation = async (reservationId, newSessionId) => {
+  return await prisma.$transaction(async (tx) => {
+    // 1. Dapatkan data reservasi lama dan sesi baru
+    const reservation = await tx.reservation.findUnique({
+      where: { id: reservationId },
+    });
+
+    if (!reservation) {
+      throw new Error("Reservasi tidak ditemukan.");
+    }
+
+    const newSession = await tx.session.findUnique({
+      where: { id: newSessionId },
+    });
+
+    if (!newSession) {
+      throw new Error("Sesi baru tidak ditemukan.");
+    }
+
+    // 2. Validasi: Pastikan sesi baru belum di-book
+    if (newSession.isBooked) {
+      throw new Error("Sesi yang dipilih sudah dipesan oleh orang lain.");
+    }
+
+    // 3. Validasi: Pastikan reservasi dalam status yang bisa di-reschedule
+    if (!["PENDING", "CONFIRMED"].includes(reservation.status)) {
+      throw new Error(
+        `Reservasi dengan status ${reservation.status} tidak dapat dijadwalkan ulang.`
+      );
+    }
+
+    const oldSessionId = reservation.sessionId;
+
+    // 4. Update sesi lama: bebaskan slot
+    await tx.session.update({
+      where: { id: oldSessionId },
+      data: { isBooked: false },
+    });
+
+    // 5. Update sesi baru: tandai sebagai sudah di-book
+    await tx.session.update({
+      where: { id: newSessionId },
+      data: { isBooked: true },
+    });
+
+    // 6. Update reservasi itu sendiri: arahkan ke sesi dan staff baru
+    const updatedReservation = await tx.reservation.update({
+      where: { id: reservationId },
+      data: {
+        sessionId: newSessionId,
+        staffId: newSession.staffId, // Penting: update juga staffId jika staff di sesi baru berbeda
+        rescheduleCount: {
+          increment: 1,
+        },
+      },
+      include: {
+        // Include data lengkap untuk response
+        customer: true,
+        service: true,
+        staff: true,
+        session: {
+          include: {
+            timeSlot: {
+              include: {
+                operatingSchedule: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return updatedReservation;
+  });
+};

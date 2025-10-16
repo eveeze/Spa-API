@@ -28,7 +28,7 @@ model Customer {
   oneSignalPlayerId        String?
   name                     String
   email                    String        @unique
-  phoneNumber              String
+  phoneNumber              String        @unique
   password                 String
   isVerified               Boolean       @default(false)
   isResetPasswordVerified  Boolean       @default(false)
@@ -108,14 +108,12 @@ model PriceTier {
 // Jadwal operasional harian (07.00-15.00)
 model OperatingSchedule {
   id        String     @id @default(uuid())
-  date      DateTime // Tanggal operasional
+  date      DateTime   @unique // Tanggal operasional
   isHoliday Boolean    @default(false) // Apakah hari libur
   notes     String? // Catatan khusus untuk hari tersebut
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
   timeSlots TimeSlot[]
-
-  @@unique([date]) // Memastikan tidak ada duplikasi jadwal untuk tanggal yang sama
 }
 
 // Timeslot untuk setiap jam operasional (07.00-15.00, durasi 1 jam)
@@ -214,6 +212,7 @@ model Reservation {
   totalPrice           Float
   status               ReservationStatus @default(PENDING)
   createdByOwner       Boolean           @default(false) // Apakah dibuat oleh owner (manual)
+  rescheduleCount      Int               @default(0)
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
   payment              Payment?
@@ -245,20 +244,6 @@ model Payment {
   paymentCodes       Json? // Kode pembayaran (VA Number, dll)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
-}
-
-// Analitik untuk owner
-model Analytics {
-  id                String   @id @default(uuid())
-  date              DateTime @unique
-  totalRevenue      Float    @default(0)
-  totalBookings     Int      @default(0)
-  completedBookings Int      @default(0)
-  cancelledBookings Int      @default(0)
-  popularServiceId  String? // Layanan terpopuler pada hari itu
-  popularStaffId    String? // Staf terpopuler pada hari itu
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
 }
 
 // Notifikasi

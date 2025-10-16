@@ -5,64 +5,91 @@ import {
   updatePayment,
   updateReservationStatus,
 } from "../repository/reservationRepository.js";
+import { updateSessionBookingStatus } from "../repository/sessionRepository.js";
 import * as notificationService from "../services/notificationService.js";
-import crypto from "node:crypto"; // <-- TAMBAHKAN BARIS INI
 
-// Function untuk process expired payments
+/**
+ * Processes payments that have passed their expiry date.
+ */
 const processExpiredPayments = async () => {
   try {
     console.log(
       `[CRON JOB] Starting expired payment check at ${new Date().toISOString()}`
     );
 
-    // Get all pending payments yang sudah expired
-    const expiredPayments = await getExpiredPendingPayments(true); // true = get expired only
+    const expiredPayments = await getExpiredPendingPayments(true);
 
     if (expiredPayments.length === 0) {
-      console.log("[CRON JOB] No expired payments found");
+      console.log("[CRON JOB] No expired payments found.");
       return;
     }
 
-    console.log(`[CRON JOB] Found ${expiredPayments.length} expired payments`);
+    console.log(
+      `[CRON JOB] Found ${expiredPayments.length} expired payments to process.`
+    );
 
     let processedCount = 0;
     let errorCount = 0;
 
     for (const payment of expiredPayments) {
       try {
-        // Double check - pastikan payment masih PENDING
         if (payment.paymentStatus !== "PENDING") {
           console.log(
-            `[CRON JOB] Skipping payment ${payment.id} - status already ${payment.paymentStatus}`
+            `[CRON JOB] Skipping payment ${payment.id} - status is already '${payment.paymentStatus}'.`
           );
           continue;
         }
 
-        // Update payment status ke EXPIRED
+        // --- DATABASE OPERATIONS ---
         await updatePayment(payment.id, {
           paymentStatus: "EXPIRED",
-          updatedAt: new Date(),
         });
-
-        // Update reservation status ke EXPIRED
         await updateReservationStatus(payment.reservationId, "EXPIRED");
+        if (payment.reservation?.sessionId) {
+          await updateSessionBookingStatus(
+            payment.reservation.sessionId,
+            false
+          );
+          console.log(
+            `[CRON JOB] Session ${payment.reservation.sessionId} has been freed.`
+          );
+        }
 
-        // Send notification ke customer
-        if (payment.reservation && payment.reservation.customer) {
-          await notificationService.sendReservationNotification(
-            payment.reservation.customer.id,
-            "Payment Expired",
-            `Your payment for ${
-              payment.reservation.service?.name || "service"
-            } has expired. Please make a new reservation if you still want to book this service.`,
-            "payment",
-            payment.reservationId
+        // --- NOTIFICATION LOGIC (NOW SENDS EMAIL) ---
+        if (payment.reservation?.customer) {
+          await notificationService.createNotificationForCustomer(
+            {
+              recipientId: payment.reservation.customer.id,
+              title: "Reservasi Dibatalkan", // This will be the email subject
+              message: `Reservasi Anda untuk layanan ${
+                payment.reservation.service?.name || "Anda"
+              } telah dibatalkan karena waktu pembayaran telah habis.`,
+              type: "RESERVATION_CANCELLED_AUTO",
+              referenceId: payment.reservationId,
+            },
+            {
+              // We are no longer sending a push notification
+              // Instead, we provide email options
+              emailOptions: {
+                templateName: "reservationCancelled", // The new HTML template file
+                templateData: {
+                  customerName: payment.reservation.customer.name,
+                  serviceName:
+                    payment.reservation.service?.name || "layanan Anda",
+                  reservationId: payment.reservationId
+                    .substring(0, 8)
+                    .toUpperCase(),
+                  reason:
+                    "Waktu pembayaran telah melewati batas yang ditentukan.",
+                },
+              },
+            }
           );
         }
 
         processedCount++;
         console.log(
-          `[CRON JOB] Successfully expired payment ${payment.id} and reservation ${payment.reservationId}`
+          `[CRON JOB] Successfully processed expired payment ${payment.id} for reservation ${payment.reservationId}.`
         );
       } catch (error) {
         errorCount++;
@@ -74,63 +101,36 @@ const processExpiredPayments = async () => {
     }
 
     console.log(
-      `[CRON JOB] Completed expired payment check. Processed: ${processedCount}, Errors: ${errorCount}`
+      `[CRON JOB] Completed check. Processed: ${processedCount}, Errors: ${errorCount}.`
     );
   } catch (error) {
     console.error(
-      "[CRON JOB ERROR] Failed to process expired payments:",
+      "[CRON JOB FATAL ERROR] The entire expired payments job failed:",
       error
     );
   }
 };
 
-// Backup function untuk manual cleanup
-const forceExpireOldPayments = async () => {
-  try {
-    console.log("[FORCE EXPIRE] Starting force expire old payments...");
-
-    // Get payments yang expired lebih dari 1 jam tapi masih PENDING
-    const oldExpiredPayments = await getExpiredPendingPayments(true, 1); // 1 hour grace period
-
-    for (const payment of oldExpiredPayments) {
-      await processexpiredPayments([payment]);
-    }
-
-    console.log(
-      `[FORCE EXPIRE] Processed ${oldExpiredPayments.length} old payments`
-    );
-  } catch (error) {
-    console.error("[FORCE EXPIRE ERROR]:", error);
-  }
-};
-
-// Schedule cron job - jalan setiap 15 menit untuk lebih responsive
+/**
+ * Initializes and starts the cron job for handling expired payments.
+ */
 const startPaymentExpiryJob = () => {
-  console.log("[CRON JOB] Payment expiry job scheduled");
-
-  // Jalan setiap 15 menit
+  console.log("[CRON] Initializing payment expiry job...");
   cron.schedule("*/15 * * * *", processExpiredPayments, {
     scheduled: true,
     timezone: process.env.TIMEZONE || "Asia/Jakarta",
     name: "payment-expiry-job",
   });
-
-  // Backup job - jalan setiap 2 jam untuk cleanup payments yang terlewat
-  cron.schedule("0 */2 * * *", forceExpireOldPayments, {
-    scheduled: true,
-    timezone: process.env.TIMEZONE || "Asia/Jakarta",
-    name: "force-expire-old-payments",
-  });
-
-  console.log("[CRON JOB] Payment expiry jobs scheduled:");
-  console.log("  - Main job: every 15 minutes");
-  console.log("  - Backup job: every 2 hours");
+  console.log("[CRON] Payment expiry job scheduled to run every 15 minutes.");
 };
 
-// Function untuk manual run (untuk testing)
+/**
+ * A function to manually trigger the payment expiry check, useful for testing.
+ */
 const runPaymentExpiryNow = async () => {
-  console.log("[MANUAL RUN] Running payment expiry check manually...");
+  console.log("[MANUAL RUN] Triggering payment expiry check manually...");
   await processExpiredPayments();
+  console.log("[MANUAL RUN] Manual check completed.");
 };
 
-export { startPaymentExpiryJob, processExpiredPayments, runPaymentExpiryNow };
+export { startPaymentExpiryJob, runPaymentExpiryNow };
