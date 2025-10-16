@@ -1,3 +1,4 @@
+// src/routes/analyticsRoutes.js
 import { Router } from "express";
 import {
   getAnalyticsOverview,
@@ -7,10 +8,14 @@ import { ownerAuth } from "../middlewares/authMiddleware.js";
 
 const router = Router();
 
-// Route for the main dashboard overview (KPIs, trend chart)
-router.get("/overview", ownerAuth, getAnalyticsOverview);
+// Semua rute di file ini memerlukan otentikasi sebagai owner
+router.use(ownerAuth);
 
-// Route for detailed insights (top services, top staff, etc.)
-router.get("/details", ownerAuth, getAnalyticsDetails);
+// Rute untuk data KPI utama di dashboard (on-the-go)
+router.get("/overview", getAnalyticsOverview);
+
+// Rute untuk data detail seperti grafik dan daftar performa
+// Bisa menerima query parameter ?days=... untuk mengubah rentang waktu
+router.get("/details", getAnalyticsDetails);
 
 export default router;

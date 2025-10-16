@@ -10,7 +10,6 @@ import {
   updatePayment,
   findPaymentByTransactionId,
   getPaymentByReservationId,
-  getReservationAnalytics,
   getPaymentById,
   getExpiredPendingPayments,
   getUpcomingReservations,
@@ -2207,41 +2206,6 @@ export const verifyManualPayment = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to verify payment",
-      error: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
-};
-
-/**
- * Get reservation analytics
- * @param {Object} req - Express request object
- * @param {Object} res - Express response object
- */
-export const getAnalytics = async (req, res) => {
-  try {
-    const { startDate, endDate } = req.query;
-
-    // Validate date parameters
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        success: false,
-        message: "Start date and end date are required",
-      });
-    }
-
-    // Get analytics data
-    const analytics = await getReservationAnalytics(startDate, endDate);
-
-    return res.status(200).json({
-      success: true,
-      message: "Analytics retrieved successfully",
-      data: analytics,
-    });
-  } catch (error) {
-    console.error("[GET ANALYTICS ERROR]:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Failed to retrieve analytics",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
