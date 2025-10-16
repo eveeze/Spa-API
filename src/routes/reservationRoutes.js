@@ -20,6 +20,7 @@ import {
   getUpcomingReservationsForDay,
   updateReservationDetailsHandler,
   confirmManualWithProofHandler,
+  rescheduleReservationHandler,
 } from "../controller/reservationController.js";
 import {
   customerAuth,
@@ -55,6 +56,11 @@ router.post(
   paymentProofUploadMiddleware,
   createManualPayment
 );
+router.put(
+  "/customer/:id/reschedule",
+  customerAuth,
+  rescheduleReservationHandler
+);
 
 // Owner routes
 router.get("/owner", ownerAuth, getFilteredReservations);
@@ -80,6 +86,7 @@ router.get(
 );
 router.put("/owner/details/:id", ownerAuth, updateReservationDetailsHandler);
 router.put("/owner/:id/status", ownerAuth, updateReservation);
+router.put("/owner/:id/reschedule", ownerAuth, rescheduleReservationHandler);
 router.get("/owner/payment/:reservationId", ownerAuth, getPaymentDetails);
 router.put("/owner/payment/:paymentId/verify", ownerAuth, verifyManualPayment);
 router.put(

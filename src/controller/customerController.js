@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import {
   findAllPelanggan,
   findPelangganByEmail,
+  findPelangganByPhoneNumber,
   findPelangganById,
   updatePelanggan,
 } from "../repository/customerRepository.js";
@@ -13,36 +14,85 @@ import prisma from "../config/db.js";
 const register = async (req, res) => {
   try {
     const { name, email, phoneNumber, password } = req.body;
-    const cekPelanggan = await findPelangganByEmail(email);
-    if (cekPelanggan && cekPelanggan.isVerified) {
-      return res.status(400).json({ message: "Email sudah terdaftar" });
+
+    // 1. Cek apakah email sudah terdaftar sebagai akun online penuh
+    const customerByEmail = await findPelangganByEmail(email);
+    if (
+      customerByEmail &&
+      customerByEmail.isVerified &&
+      !customerByEmail.isManualCustomer
+    ) {
+      return res.status(400).json({ message: "Email sudah terdaftar." });
     }
-    const otp = generateOTP();
+
+    // 2. Cek apakah nomor telepon sudah terdaftar
+    const customerByPhone = await findPelangganByPhoneNumber(phoneNumber);
+
     const salt = parseInt(process.env.SALT);
     const hashedPassword = await bcrypt.hash(password, salt);
-    const customer = await prisma.customer.upsert({
-      where: { email },
-      update: {
-        name,
-        phoneNumber,
-        password: hashedPassword,
-        verificationOtp: otp,
-        verificationOtpCreatedAt: new Date(),
-      },
-      create: {
-        name,
-        email,
-        phoneNumber,
-        password: hashedPassword,
-        verificationOtp: otp,
-        verificationOtpCreatedAt: new Date(),
-      },
-    });
-    await sendOtp(email, otp);
-    return res
-      .status(201)
-      .json({ customer, message: "Pelanggan berhasil didaftarkan" });
+    const otp = generateOTP();
+
+    // 3. Terapkan Logika Percabangan (inti dari solusi)
+
+    // SKENARIO A: Klaim Akun (Nomor HP ada & statusnya manual)
+    if (customerByPhone && customerByPhone.isManualCustomer) {
+      const activatedCustomer = await prisma.customer.update({
+        where: { id: customerByPhone.id },
+        data: {
+          name,
+          email, // Update email dummy dengan email asli
+          password: hashedPassword, // Update password dummy dengan password baru
+          isManualCustomer: false, // Ubah jadi akun online
+          isVerified: false, // Wajibkan verifikasi email baru
+          verificationOtp: otp,
+          verificationOtpCreatedAt: new Date(),
+        },
+      });
+
+      await sendOtp(email, otp); // Kirim OTP ke email BARU
+
+      return res.status(200).json({
+        customer: activatedCustomer,
+        message:
+          "Akun manual ditemukan. Silakan verifikasi email Anda untuk mengaktifkan akun.",
+      });
+    }
+
+    // SKENARIO B: Nomor HP sudah terdaftar sebagai akun online
+    else if (customerByPhone && !customerByPhone.isManualCustomer) {
+      return res.status(400).json({
+        message:
+          "Nomor telepon sudah terdaftar. Silakan login atau gunakan fitur Lupa Password.",
+      });
+    }
+
+    // SKENARIO C: Pendaftaran baru (email dan nomor HP belum ada)
+    else {
+      const newCustomer = await prisma.customer.create({
+        data: {
+          name,
+          email,
+          phoneNumber,
+          password: hashedPassword,
+          verificationOtp: otp,
+          verificationOtpCreatedAt: new Date(),
+        },
+      });
+
+      await sendOtp(email, otp);
+
+      return res.status(201).json({
+        customer: newCustomer,
+        message:
+          "Pendaftaran berhasil. Silakan cek email Anda untuk verifikasi OTP.",
+      });
+    }
   } catch (err) {
+    if (err.code === "P2002") {
+      return res
+        .status(400)
+        .json({ message: "Email atau Nomor Telepon sudah digunakan." });
+    }
     console.error(err.message);
     return res.status(500).json({ message: "Internal server error" });
   }

@@ -5,7 +5,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { initCronJobs } from "./config/cronScheduler.js";
 import { startPaymentExpiryJob } from "./config/paymentExpiryJob.js";
-import paymentScheduler from "./config/paymentScheduler.js";
+import { startAnalyticsJob } from "./config/analyticsJob.js";
 import http from "http";
 import { Server } from "socket.io";
 // import routes
@@ -21,6 +21,8 @@ import reservationRoutes from "./routes/reservationRoutes.js";
 import schedulerRoutes from "./routes/schedulerRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import ratingRoutes from "./routes/ratingRoutes.js";
+import analyticsRoutes from "./routes/analyticsRoutes.js"; // <-- IMPORT BARU
+
 dotenv.config();
 
 const app = express();
@@ -78,6 +80,8 @@ app.use("/api/reservations", reservationRoutes);
 app.use("/api/scheduler", schedulerRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/ratings", ratingRoutes);
+app.use("/api/analytics", analyticsRoutes); // <-- DAFTARKAN ROUTE BARU
+
 const PORT = process.env.PORT || 5000;
 
 app.get("/", (req, res) => {
@@ -87,9 +91,6 @@ app.get("/", (req, res) => {
 // Graceful shutdown handler
 const gracefulShutdown = () => {
   console.log("\n[SHUTDOWN] Received shutdown signal...");
-
-  // Clear all payment timers
-  paymentScheduler.clearAllTimers();
 
   console.log("[SHUTDOWN] Cleanup completed");
   process.exit(0);
@@ -103,22 +104,12 @@ app.listen(PORT, async () => {
   console.log(`Server sudah berjalan di port : ${PORT}`);
 
   try {
-    // Initialize scheduler first
-    console.log("[STARTUP] Initializing payment scheduler...");
-
-    // Start cleanup job
-    paymentScheduler.startCleanupJob();
-
-    // Initialize existing pending payments
-    await paymentScheduler.initializePendingPayments();
-
     // Start cron jobs
     const apiBaseUrl = process.env.API_BASE_URL || `http://localhost:${PORT}`;
     initCronJobs(apiBaseUrl);
     startPaymentExpiryJob();
-
+    startAnalyticsJob();
     console.log("[STARTUP] All schedulers initialized successfully");
-    console.log(`[STARTUP] Scheduler stats:`, paymentScheduler.getStats());
   } catch (error) {
     console.error("[STARTUP ERROR] Failed to initialize schedulers:", error);
   }

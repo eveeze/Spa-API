@@ -9,6 +9,12 @@ export const findPelangganByEmail = async (email) => {
   });
   return customer;
 };
+export const findPelangganByPhoneNumber = async (phoneNumber) => {
+  const customer = await prisma.customer.findUnique({
+    where: { phoneNumber },
+  });
+  return customer;
+};
 
 export const findPelangganById = async (id) => {
   const customer = await prisma.customer.findUnique({
