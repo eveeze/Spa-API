@@ -10,7 +10,6 @@ import {
   getAvailablePaymentMethods,
   createManualPayment,
   verifyManualPayment,
-  getAnalytics,
   createManualReservation,
   updateManualReservationPayment,
   uploadManualPaymentProof,
@@ -66,7 +65,6 @@ router.put(
 // Owner routes
 router.get("/owner", ownerAuth, getFilteredReservations);
 router.get("/owner/payment-methods", ownerAuth, getAvailablePaymentMethods); // MOVED UP
-router.get("/analytics", ownerAuth, getAnalytics); // MOVED UP
 
 // Manual booking routes (untuk owner) - specific routes
 router.post(
