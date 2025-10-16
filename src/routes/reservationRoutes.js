@@ -21,6 +21,7 @@ import {
   updateReservationDetailsHandler,
   confirmManualWithProofHandler,
   rescheduleReservationHandler,
+  runPaymentExpiryController,
 } from "../controller/reservationController.js";
 import {
   customerAuth,
@@ -31,7 +32,7 @@ import {
 import { paymentProofUploadMiddleware } from "../middlewares/imageUploadMiddleware.js";
 
 const router = express.Router();
-
+router.get("/cron/process-expired", runPaymentExpiryController);
 // BARU: Test route untuk development
 if (process.env.NODE_ENV === "development") {
   router.get("/test/tripay", ownerAuth, testTripayIntegration);

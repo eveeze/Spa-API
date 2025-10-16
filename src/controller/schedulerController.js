@@ -1,4 +1,4 @@
-// schedulerController.js - FIXED VERSION
+// src/controller/schedulerController.js
 import { parseISO, addDays } from "date-fns";
 import {
   generateOperatingSchedules,
@@ -6,15 +6,14 @@ import {
   generateSessions,
   generateFullSchedule,
 } from "../repository/schedulerRepository.js";
+import { runH1Reminder } from "../config/cronScheduler.js";
 import prisma from "../config/db.js";
 import dotenv from "dotenv";
 
-// Ensure environment variables are loaded
 dotenv.config();
 
 /**
- * Generate full schedule (operating schedules, time slots, and sessions)
- * for the specified number of days
+ * [TIDAK BERUBAH] Generate full schedule for the specified number of days
  */
 export const generateSchedule = async (req, res) => {
   try {
@@ -26,25 +25,21 @@ export const generateSchedule = async (req, res) => {
       timeZoneOffset,
     } = req.body;
 
-    // Get timezone offset from environment or use provided value or default
     const tzOffset =
       timeZoneOffset !== undefined
         ? parseInt(timeZoneOffset)
         : process.env.TIMEZONE_OFFSET
         ? parseInt(process.env.TIMEZONE_OFFSET)
-        : 7; // Default to Indonesia time (UTC+7)
+        : 7;
 
-    // Parse start date or use current date
     const parsedStartDate = startDate ? parseISO(startDate) : new Date();
 
-    // Use updated timeConfig with WIB time range (7-15) which will be converted to UTC (0-8)
     const defaultTimeConfig = {
-      startHour: 7, // 7 AM WIB
-      endHour: 15, // 3 PM WIB
+      startHour: 7,
+      endHour: 15,
       slotDurationMinutes: 60,
     };
 
-    // Generate full schedule with timezone support
     const result = await generateFullSchedule(
       parsedStartDate,
       parseInt(days),
@@ -74,12 +69,10 @@ export const generateSchedule = async (req, res) => {
 };
 
 /**
- * Run the schedule generation as a scheduled task
- * This is meant to be called by a CRON job
+ * [TIDAK BERUBAH] Run the schedule generation as a scheduled task
  */
 export const runScheduledGeneration = async (req, res) => {
   try {
-    // Verify secret key for additional security (optional)
     const { secret } = req.query;
 
     if (
@@ -92,22 +85,16 @@ export const runScheduledGeneration = async (req, res) => {
       });
     }
 
-    // Start from tomorrow to avoid duplicate schedules
     const startDate = addDays(new Date(), 1);
-
-    // Get timezone offset from environment or use default Indonesia timezone (UTC+7)
     const timeZoneOffset = process.env.TIMEZONE_OFFSET
       ? parseInt(process.env.TIMEZONE_OFFSET)
       : 7;
-
-    // Default time config for WIB time range 07:00-15:00
     const defaultTimeConfig = {
-      startHour: 7, // 7 AM WIB
-      endHour: 15, // 3 PM WIB
+      startHour: 7,
+      endHour: 15,
       slotDurationMinutes: 60,
     };
 
-    // Generate 7 days of schedules with proper timezone handling
     const result = await generateFullSchedule(
       startDate,
       7,
@@ -137,12 +124,46 @@ export const runScheduledGeneration = async (req, res) => {
 };
 
 /**
- * Generate specific components (only operating schedules, or only time slots)
+ * [BARU] Menjalankan tugas pengiriman pengingat H-1 melalui trigger API.
+ */
+export const runH1ReminderController = async (req, res) => {
+  try {
+    const { secret } = req.query;
+
+    // Amankan endpoint ini dengan secret key
+    if (
+      process.env.SCHEDULER_SECRET &&
+      secret !== process.env.SCHEDULER_SECRET
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized access",
+      });
+    }
+
+    const result = await runH1Reminder();
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    console.error("[H-1 REMINDER CONTROLLER ERROR]:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to run H-1 reminder job",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
+/**
+ * [TIDAK BERUBAH] Generate specific components
  */
 export const generateScheduleComponents = async (req, res) => {
   try {
     const {
-      component, // 'operatingSchedules', 'timeSlots', or 'sessions'
+      component,
       scheduleIds,
       startDate,
       days = 7,
@@ -151,20 +172,18 @@ export const generateScheduleComponents = async (req, res) => {
       timeZoneOffset,
     } = req.body;
 
-    // Get timezone offset from environment or use provided value or default
     const tzOffset =
       timeZoneOffset !== undefined
         ? parseInt(timeZoneOffset)
         : process.env.TIMEZONE_OFFSET
         ? parseInt(process.env.TIMEZONE_OFFSET)
-        : 7; // Default to Indonesia time (UTC+7)
+        : 7;
 
     const parsedStartDate = startDate ? parseISO(startDate) : new Date();
 
-    // Default time config for WIB time range 07:00-15:00
     const defaultTimeConfig = {
-      startHour: 7, // 7 AM WIB
-      endHour: 15, // 3 PM WIB
+      startHour: 7,
+      endHour: 15,
       slotDurationMinutes: 60,
     };
 
@@ -192,7 +211,6 @@ export const generateScheduleComponents = async (req, res) => {
           });
         }
 
-        // Fetch operating schedules by their IDs
         const operatingSchedules = await Promise.all(
           scheduleIds.map(async (id) => {
             return await prisma.operatingSchedule.findUnique({

@@ -4,16 +4,24 @@ import {
   generateSchedule,
   runScheduledGeneration,
   generateScheduleComponents,
+  runH1ReminderController,
 } from "../controller/schedulerController.js";
 import { ownerAuth } from "../middlewares/authMiddleware.js";
 
 const router = express.Router();
 
-// Protected routes (owner only)
-router.post("/generate", ownerAuth, generateSchedule);
-router.post("/generate/components", ownerAuth, generateScheduleComponents);
+// --- Endpoint untuk dipanggil oleh Cron Job Eksternal ---
 
-// Cron job endpoint - can be protected with a secret key
-router.get("/cron", runScheduledGeneration);
+// Endpoint untuk generate jadwal mingguan
+router.get("/cron/generate-schedule", runScheduledGeneration);
+
+// Endpoint untuk mengirim pengingat H-1
+router.get("/cron/send-reminders", runH1ReminderController);
+
+// --- Endpoint untuk Owner (dilindungi otentikasi) ---
+router.use(ownerAuth);
+
+router.post("/generate", generateSchedule);
+router.post("/generate/components", generateScheduleComponents);
 
 export default router;
