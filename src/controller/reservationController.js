@@ -23,6 +23,7 @@ import {
   updateSessionBookingStatus,
 } from "../repository/sessionRepository.js";
 import { validateAndFormatPhone } from "../utils/paymentUtils.js";
+import { processExpiredPayments } from "../config/paymentExpiryJob.js";
 import {
   getPaymentChannels,
   createTransaction,
@@ -2413,6 +2414,41 @@ export const confirmManualWithProofHandler = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to confirm reservation with proof",
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+};
+
+/**
+ * [BARU] Menjalankan tugas pengecekan pembayaran yang kedaluwarsa.
+ * Endpoint ini akan dipanggil oleh cron job eksternal.
+ */
+export const runPaymentExpiryController = async (req, res) => {
+  try {
+    const { secret } = req.query;
+
+    // Amankan endpoint ini dengan secret key
+    if (
+      process.env.SCHEDULER_SECRET &&
+      secret !== process.env.SCHEDULER_SECRET
+    ) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized access",
+      });
+    }
+
+    const result = await processExpiredPayments();
+
+    res.status(200).json({
+      success: true,
+      message: result.message,
+    });
+  } catch (error) {
+    console.error("[PAYMENT EXPIRY CONTROLLER ERROR]:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to run payment expiry job",
       error: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }

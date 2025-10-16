@@ -1,121 +1,84 @@
 // src/config/cronScheduler.js
-import cron from "node-cron";
-import axios from "axios";
-import dotenv from "dotenv";
-import crypto from "node:crypto"; // <-- TAMBAHKAN BARIS INI
 import prisma from "../config/db.js";
-dotenv.config();
+import * as notificationService from "../services/notificationService.js";
 
 /**
- * Initialize cron jobs
- * @param {String} apiBaseUrl - The base URL of the API
+ * Menjalankan tugas pengiriman pengingat reservasi H-1.
+ * Fungsi ini akan dipanggil oleh endpoint API.
  */
-export const initCronJobs = (apiBaseUrl) => {
-  // Schedule to run every Sunday at midnight (0 0 * * 0)
-  cron.schedule("0 0 * * 0", async () => {
-    console.log(
-      "[CRON] Running scheduled generation at",
-      new Date().toISOString()
-    );
+export const runH1Reminder = async () => {
+  console.log(
+    "[CRON_RUNNER] Running H-1 reservation reminder job at",
+    new Date().toISOString()
+  );
 
-    try {
-      const secret = process.env.SCHEDULER_SECRET || "default-secret";
-      const response = await axios.get(
-        `${apiBaseUrl}/api/scheduler/cron?secret=${secret}`
-      );
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const startOfTomorrow = new Date(tomorrow.setHours(0, 0, 0, 0));
+  const endOfTomorrow = new Date(tomorrow.setHours(23, 59, 59, 999));
 
-      console.log("[CRON] Scheduled generation result:", response.data);
-    } catch (error) {
-      console.error("[CRON] Scheduled generation failed:", error.message);
-    }
-  });
-
-  console.log("[CRON] Schedule generation job initialized");
-};
-cron.schedule(
-  "0 9 * * *",
-  async () => {
-    console.log(
-      "[CRON_REMINDER] Running H-1 reservation reminder job at",
-      new Date().toISOString()
-    );
-
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const startOfTomorrow = new Date(tomorrow.setHours(0, 0, 0, 0));
-    const endOfTomorrow = new Date(tomorrow.setHours(23, 59, 59, 999));
-
-    try {
-      const upcomingReservations = await prisma.reservation.findMany({
-        where: {
-          status: "CONFIRMED",
-          session: {
-            timeSlot: {
-              startTime: {
-                gte: startOfTomorrow,
-                lte: endOfTomorrow,
-              },
+  try {
+    const upcomingReservations = await prisma.reservation.findMany({
+      where: {
+        status: "CONFIRMED",
+        session: {
+          timeSlot: {
+            startTime: {
+              gte: startOfTomorrow,
+              lte: endOfTomorrow,
             },
           },
         },
-        include: {
-          customer: {
-            select: { id: true, oneSignalPlayerId: true },
-          },
-          service: {
-            select: { name: true },
-          },
-          session: {
-            include: {
-              timeSlot: true,
-            },
+      },
+      include: {
+        customer: {
+          select: { id: true, oneSignalPlayerId: true },
+        },
+        service: {
+          select: { name: true },
+        },
+        session: {
+          include: {
+            timeSlot: true,
           },
         },
+      },
+    });
+
+    console.log(
+      `[CRON_RUNNER] Found ${upcomingReservations.length} reservations for tomorrow.`
+    );
+
+    let successCount = 0;
+    for (const reservation of upcomingReservations) {
+      const time = new Date(
+        reservation.session.timeSlot.startTime
+      ).toLocaleTimeString("id-ID", {
+        hour: "2-digit",
+        minute: "2-digit",
+        timeZone: "Asia/Jakarta",
       });
 
-      console.log(
-        `[CRON_REMINDER] Found ${upcomingReservations.length} reservations for tomorrow.`
+      // Menggunakan service notifikasi yang sudah ada
+      await notificationService.createNotificationForCustomer(
+        {
+          recipientId: reservation.customer.id,
+          title: "Pengingat Jadwal Spa Besok",
+          message: `Jangan lupa, jadwal spa Anda untuk layanan ${reservation.service.name} adalah besok pukul ${time}.`,
+          type: "RESERVATION_REMINDER",
+          referenceId: reservation.id,
+        },
+        { sendPush: true }
       );
-
-      for (const reservation of upcomingReservations) {
-        const time = new Date(
-          reservation.session.timeSlot.startTime
-        ).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
-
-        await notificationService.sendPushNotificationToCustomer(
-          reservation.customer.id,
-          "Pengingat Jadwal Spa Besok",
-          `Jangan lupa, jadwal spa Anda untuk layanan ${reservation.service.name} adalah besok pukul ${time}.`,
-          { reservationId: reservation.id }
-        );
-      }
-    } catch (error) {
-      console.error("[CRON_REMINDER_ERROR] Failed to send reminders:", error);
+      successCount++;
     }
-  },
-  {
-    scheduled: true,
-    timezone: "Asia/Jakarta", // Penting untuk zona waktu
-  }
-);
 
-console.log("[CRON] H-1 Reservation reminder job initialized.");
-
-/**
- * Run the schedule generation manually
- * @returns {Promise} The result of the schedule generation
- */
-export const runManualGeneration = async () => {
-  try {
-    const secret = process.env.SCHEDULER_SECRET || "default-secret";
-    const apiBaseUrl = process.env.API_BASE_URL || "http://localhost:5000";
-
-    const response = await axios.get(
-      `${apiBaseUrl}/api/scheduler/cron?secret=${secret}`
-    );
-    return response.data;
+    return {
+      success: true,
+      message: `Successfully sent ${successCount} of ${upcomingReservations.length} reminders.`,
+    };
   } catch (error) {
-    console.error("[MANUAL CRON] Generation failed:", error.message);
-    throw error;
+    console.error("[CRON_RUNNER_ERROR] Failed to send reminders:", error);
+    throw new Error(`Failed to send reminders: ${error.message}`);
   }
 };

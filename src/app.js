@@ -3,9 +3,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { initCronJobs } from "./config/cronScheduler.js";
-import { startPaymentExpiryJob } from "./config/paymentExpiryJob.js";
-import { startAnalyticsJob } from "./config/analyticsJob.js";
+import paymentScheduler from "./config/paymentScheduler.js";
 import http from "http";
 import { Server } from "socket.io";
 // import routes
@@ -21,7 +19,6 @@ import reservationRoutes from "./routes/reservationRoutes.js";
 import schedulerRoutes from "./routes/schedulerRoutes.js";
 import notificationRoutes from "./routes/notificationRoutes.js";
 import ratingRoutes from "./routes/ratingRoutes.js";
-import analyticsRoutes from "./routes/analyticsRoutes.js"; // <-- IMPORT BARU
 
 dotenv.config();
 
@@ -63,7 +60,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// 6. Teruskan instance io dan onlineUsers ke app object agar bisa diakses di controller
+// Teruskan instance io dan onlineUsers ke app object agar bisa diakses di controller
 app.set("socketio", io);
 app.set("onlineUsers", onlineUsers);
 
@@ -80,18 +77,17 @@ app.use("/api/reservations", reservationRoutes);
 app.use("/api/scheduler", schedulerRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/ratings", ratingRoutes);
-app.use("/api/analytics", analyticsRoutes); // <-- DAFTARKAN ROUTE BARU
 
 const PORT = process.env.PORT || 5000;
 
 app.get("/", (req, res) => {
-  res.send("selamat datang di api ema baby spa");
+  res.send("Selamat datang di API Ema Baby Spa");
 });
 
 // Graceful shutdown handler
 const gracefulShutdown = () => {
   console.log("\n[SHUTDOWN] Received shutdown signal...");
-
+  paymentScheduler.clearAllTimers();
   console.log("[SHUTDOWN] Cleanup completed");
   process.exit(0);
 };
@@ -101,17 +97,20 @@ process.on("SIGTERM", gracefulShutdown);
 process.on("SIGINT", gracefulShutdown);
 
 app.listen(PORT, async () => {
-  console.log(`Server sudah berjalan di port : ${PORT}`);
+  console.log(`Server sudah berjalan di port: ${PORT}`);
 
   try {
-    // Start cron jobs
-    const apiBaseUrl = process.env.API_BASE_URL || `http://localhost:${PORT}`;
-    initCronJobs(apiBaseUrl);
-    startPaymentExpiryJob();
-    startAnalyticsJob();
-    console.log("[STARTUP] All schedulers initialized successfully");
+    // Inisialisasi payment scheduler (bukan cron job, ini untuk real-time expiry)
+    console.log("[STARTUP] Initializing payment scheduler...");
+    paymentScheduler.startCleanupJob();
+    await paymentScheduler.initializePendingPayments();
+    console.log("[STARTUP] Payment scheduler initialized successfully.");
+    console.log(`[STARTUP] Scheduler stats:`, paymentScheduler.getStats());
   } catch (error) {
-    console.error("[STARTUP ERROR] Failed to initialize schedulers:", error);
+    console.error(
+      "[STARTUP ERROR] Failed to initialize payment scheduler:",
+      error
+    );
   }
 });
 
