@@ -1,6 +1,8 @@
 // src/controller/reservationController.js
 import pkg from "uuid";
 const { v4: uuidv4 } = pkg;
+import { randomBytes } from "node:crypto";
+
 import {
   createReservation,
   getReservationById,
@@ -44,10 +46,11 @@ const MINIMUM_HOURS_BEFORE_RESCHEDULE = parseInt(
 );
 const MAX_RESCHEDULE_COUNT = parseInt(process.env.MAX_RESCHEDULE || "2", 10);
 const generateRatingToken = () => {
-  const token = crypto.randomBytes(20).toString("hex");
+  const token = randomBytes(20).toString("hex");
   const expiresAt = addDays(new Date(), 3);
   return { token, expiresAt };
 };
+
 /**
  * Get upcoming reservations
  * @param {Object} req - Express request object
