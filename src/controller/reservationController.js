@@ -593,8 +593,8 @@ export const updateReservation = async (req, res) => {
     }
 
     // 4. Update Status di Database
-    // Kita update dulu, lalu ambil data terbarunya (updatedReservation)
-    const updatedReservation = await prisma.reservation.update({
+    // Gunakan 'let' agar variabel bisa di-update nanti jika ada token baru
+    let updatedReservation = await prisma.reservation.update({
       where: { id },
       data: { status },
       include: {
@@ -614,7 +614,6 @@ export const updateReservation = async (req, res) => {
       await updateSessionBookingStatus(reservation.sessionId, false);
 
       // Kirim email cancel HANYA jika bukan customer manual (email dummy)
-      // Cek awalan "manual_" pada email customer
       if (!updatedReservation.customer.email.startsWith("manual_")) {
         await createNotificationForCustomer(
           {
@@ -647,20 +646,29 @@ export const updateReservation = async (req, res) => {
         // --- LOGIKA BARU: Generate Link WA & Kirim Email ke Owner ---
 
         // A. Buat Token Rating
-        // (Pastikan fungsi generateRatingToken ada di scope file ini, biasanya di bagian atas file)
         const { token, expiresAt } = generateRatingToken();
 
-        // B. Simpan token ke database reservasi
-        await prisma.reservation.update({
+        // B. Simpan token ke database reservasi DAN UPDATE VARIABEL updatedReservation
+        // (PENTING: Timpa variabel updatedReservation dengan data terbaru agar response API valid)
+        updatedReservation = await prisma.reservation.update({
           where: { id },
           data: { ratingToken: token, ratingTokenExpiresAt: expiresAt },
+          include: {
+            // Include ulang relasi agar data di response tetap lengkap
+            customer: true,
+            service: true,
+            staff: true,
+            session: true,
+            payment: true,
+            rating: true,
+          },
         });
 
         // C. Buat Link
         const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
         const ratingUrl = `${frontendUrl}/rating/${token}`;
 
-        // Buat Link WA (menggunakan helper function di bawah)
+        // Buat Link WA
         const whatsappLink = generateWhatsAppLink(
           updatedReservation.customer.phoneNumber,
           updatedReservation.customer.name,
@@ -676,14 +684,14 @@ export const updateReservation = async (req, res) => {
             referenceId: updatedReservation.id,
           },
           {
-            sendPush: true, // Kirim notif ke HP Owner
+            sendPush: true,
             emailOptions: {
-              templateName: "ownerManualRating", // Pastikan file HTML template ini sudah dibuat
+              templateName: "ownerManualRating",
               templateData: {
                 serviceName: updatedReservation.service.name,
                 customerName: updatedReservation.customer.name,
                 customerPhone: updatedReservation.customer.phoneNumber,
-                whatsappLink: whatsappLink, // Link ini akan jadi tombol di email
+                whatsappLink: whatsappLink,
               },
             },
           }
@@ -711,7 +719,7 @@ export const updateReservation = async (req, res) => {
       }
     }
 
-    // 6. Return response sukses
+    // 6. Return response sukses (Sekarang data token rating pasti ada di updatedReservation)
     return res.status(200).json({
       success: true,
       message: "Reservation status updated successfully",
