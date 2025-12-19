@@ -116,31 +116,30 @@ export const createNotificationForCustomer = async (
 
 /**
  * ==========================================================================================
- * FUNGSI (2): Membuat notifikasi untuk SEMUA owner dan mengirim satu push notification.
+ * FUNGSI (2): Membuat notifikasi untuk SEMUA owner dan mengirim Push Notification + EMAIL.
  * ==========================================================================================
  */
 export const createNotificationForAllOwners = async (
   notificationData,
   options = {}
 ) => {
-  const { sendPush = false } = options;
+  const { sendPush = false, emailOptions = null } = options;
   const { title, message, type, referenceId, pushMessage } = notificationData;
 
   try {
+    // 1. Ambil data owner (ID, OneSignal ID, Email, Nama)
     const owners = await prisma.owner.findMany({
-      select: { id: true, oneSignalPlayerId: true },
+      select: { id: true, oneSignalPlayerId: true, email: true, name: true },
     });
 
     if (owners.length === 0) {
-      console.warn(
-        "[OWNER_NOTIFICATION] Tidak ada owner yang ditemukan di database."
-      );
+      console.warn("[OWNER_NOTIFICATION] Tidak ada owner yang ditemukan.");
       return;
     }
 
-    // 1. Buat data notifikasi untuk setiap owner (untuk disimpan ke DB)
+    // 2. Simpan notifikasi ke database (untuk lonceng notifikasi di dashboard)
     const notificationsToCreate = owners.map((owner) => ({
-      recipientId: owner.id, // ID owner spesifik
+      recipientId: owner.id,
       recipientType: "owner",
       title,
       message,
@@ -148,19 +147,16 @@ export const createNotificationForAllOwners = async (
       referenceId,
     }));
 
-    // Simpan semua notifikasi ke database dalam satu perintah
     await prisma.notification.createMany({
       data: notificationsToCreate,
     });
-    console.log(
-      `[DB_NOTIFICATION] ${owners.length} notifikasi untuk owner berhasil disimpan.`
-    );
 
-    // 2. Kirim SATU push notification ke semua owner sekaligus (efisien)
+    // 3. Kirim Push Notification (OneSignal)
     if (sendPush) {
       const ownerPlayerIds = owners
         .map((owner) => owner.oneSignalPlayerId)
         .filter((id) => id);
+
       if (ownerPlayerIds.length > 0) {
         await _sendPushNotification(
           ownerPlayerIds,
@@ -170,9 +166,46 @@ export const createNotificationForAllOwners = async (
         );
       }
     }
+
+    // 4. [LOGIKA BARU] Kirim Email ke Owner (Jika ada emailOptions)
+    if (emailOptions) {
+      const { templateName, templateData } = emailOptions;
+
+      // Filter owner yang punya email valid
+      const ownersWithEmail = owners.filter((o) => o.email);
+
+      // Kirim email secara paralel
+      await Promise.all(
+        ownersWithEmail.map(async (owner) => {
+          try {
+            // Inject nama owner agar email lebih personal
+            const finalData = { ...templateData, ownerName: owner.name };
+
+            await sendEmailWithTemplate(
+              owner.email,
+              title,
+              templateName,
+              finalData
+            );
+          } catch (err) {
+            console.error(
+              `[EMAIL_FAIL] Gagal kirim ke owner ${owner.email}:`,
+              err.message
+            );
+            // Kita catch error di sini agar 1 gagal tidak membatalkan yang lain
+          }
+        })
+      );
+
+      if (ownersWithEmail.length > 0) {
+        console.log(
+          `[OWNER_NOTIFICATION] Email instruksi dikirim ke ${ownersWithEmail.length} owner.`
+        );
+      }
+    }
   } catch (error) {
     console.error(
-      "[OWNER_NOTIFICATION_ERROR] Gagal membuat notifikasi untuk owner:",
+      "[OWNER_NOTIFICATION_ERROR] Gagal membuat notifikasi:",
       error
     );
   }

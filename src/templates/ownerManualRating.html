@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kirim Rating Manual - Ema Mom Kids Baby Spa</title>
+    <style>
+        body {
+            font-family: "Arial", sans-serif;
+            background-color: #e6f7ff;
+            /* Background biru muda sesuai template Anda */
+            margin: 0;
+            padding: 0;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .header {
+            text-align: center;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #cce7ff;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 26px;
+            color: #0073e6;
+            /* Warna biru header sesuai template Anda */
+        }
+
+        .content {
+            padding: 20px 0;
+            color: #555555;
+        }
+
+        .content p {
+            font-size: 16px;
+            color: #555555;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        /* Box Informasi (Diadaptasi dari style status-box Anda) */
+        .info-box {
+            background-color: #f0f8ff;
+            /* Biru sangat muda agar kontras dikit */
+            border: 1px solid #cce7ff;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: left;
+        }
+
+        .info-row {
+            margin-bottom: 8px;
+            font-size: 15px;
+        }
+
+        .info-label {
+            font-weight: bold;
+            color: #0073e6;
+            display: inline-block;
+            width: 140px;
+        }
+
+        /* Style Tombol WhatsApp */
+        .btn-container {
+            text-align: center;
+            margin-top: 25px;
+            margin-bottom: 10px;
+        }
+
+        .btn-wa {
+            background-color: #25D366;
+            /* Warna Hijau WA */
+            color: #ffffff !important;
+            text-decoration: none;
+            padding: 12px 25px;
+            border-radius: 50px;
+            font-weight: bold;
+            font-size: 16px;
+            display: inline-block;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+
+        .footer {
+            text-align: center;
+            padding-top: 20px;
+            border-top: 1px solid #cce7ff;
+            font-size: 14px;
+            color: #777777;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Ema Mom Kids Baby Spa</h1>
+        </div>
+        <div class="content">
+            <p>Halo <strong>{{ownerName}}</strong>,</p>
+            <p>
+                Satu reservasi manual baru saja diselesaikan. Mohon kirimkan formulir rating kepada pelanggan agar
+                mereka dapat memberikan ulasan.
+            </p>
+
+            <div class="info-box">
+                <div class="info-row">
+                    <span class="info-label">Pelanggan:</span> {{customerName}}
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Layanan:</span> {{serviceName}}
+                </div>
+                <div class="info-row">
+                    <span class="info-label">No. WhatsApp:</span> {{customerPhone}}
+                </div>
+            </div>
+
+            <p style="text-align: center;">Klik tombol di bawah untuk membuka WhatsApp:</p>
+
+            <div class="btn-container">
+                <a href="{{whatsappLink}}" class="btn-wa">
+                    Kirim Rating via WhatsApp
+                </a>
+            </div>
+
+            <p style="font-size: 13px; text-align: center; color: #999;">
+                <em>*Pastikan aplikasi WhatsApp sudah terinstall.</em>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Salam hangat,<br />Ema Mom Kids Baby Spa System</p>
+        </div>
+    </div>
+</body>
+
+</html>

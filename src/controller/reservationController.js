@@ -51,6 +51,24 @@ const generateRatingToken = () => {
   return { token, expiresAt };
 };
 
+const generateWhatsAppLink = (phone, name, link) => {
+  if (!phone) return null;
+
+  // Format nomor HP ke 62
+  let formattedPhone = phone.toString().replace(/\D/g, ""); // Hapus karakter non-angka
+  if (formattedPhone.startsWith("0")) {
+    formattedPhone = "62" + formattedPhone.slice(1);
+  } else if (!formattedPhone.startsWith("62")) {
+    // Asumsi jika tidak mulai 0 atau 62, tambahkan 62 (jaga-jaga)
+    formattedPhone = "62" + formattedPhone;
+  }
+
+  // Isi pesan WA (Nama Spa sudah diperbaiki)
+  const message = `Halo Kak ${name}, terima kasih sudah berkunjung ke Ema Mom Kids Baby Spa!%0A%0AMohon kesediaannya untuk memberikan rating pelayanan kami melalui link berikut:%0A${link}%0A%0ATerima kasih!`;
+
+  return `https://wa.me/${formattedPhone}?text=${message}`;
+};
+
 /**
  * Get upcoming reservations
  * @param {Object} req - Express request object
@@ -542,7 +560,7 @@ export const updateReservation = async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
 
-    // 1. Validasi Input (Tidak ada perubahan)
+    // 1. Validasi Input Status
     const validStatuses = [
       "CONFIRMED",
       "IN_PROGRESS",
@@ -556,7 +574,7 @@ export const updateReservation = async (req, res) => {
       });
     }
 
-    // 2. Ambil data reservasi awal untuk validasi
+    // 2. Cek Data Reservasi Lama
     const reservation = await getReservationById(id);
 
     if (!reservation) {
@@ -566,7 +584,7 @@ export const updateReservation = async (req, res) => {
       });
     }
 
-    // 3. Validasi transisi status (Tidak ada perubahan)
+    // 3. Validasi Transisi Status
     if (!isValidStatusTransition(reservation.status, status)) {
       return res.status(400).json({
         success: false,
@@ -574,28 +592,13 @@ export const updateReservation = async (req, res) => {
       });
     }
 
-    // 4. Siapkan "paket" data yang akan di-update
-    const updateData = {
-      status: status,
-    };
-
-    // 5. Tambahkan data token rating secara kondisional ke dalam "paket"
-    if (status === "COMPLETED" && reservation.reservationType === "MANUAL") {
-      const { token, expiresAt } = generateRatingToken();
-      updateData.ratingToken = token;
-      updateData.ratingTokenExpiresAt = expiresAt;
-      console.log(
-        `Rating token will be generated for manual reservation #${id}`
-      );
-    }
-
+    // 4. Update Status di Database
+    // Kita update dulu, lalu ambil data terbarunya (updatedReservation)
     const updatedReservation = await prisma.reservation.update({
       where: { id },
-      data: updateData,
+      data: { status },
       include: {
-        customer: {
-          select: { id: true, name: true, email: true, phoneNumber: true },
-        },
+        customer: true,
         service: true,
         staff: true,
         session: true,
@@ -604,54 +607,111 @@ export const updateReservation = async (req, res) => {
       },
     });
 
-    // 7. Jalankan logika tambahan setelah update berhasil (Notifikasi, dll)
+    // 5. === LOGIKA NOTIFIKASI & RATING ===
+
+    // Skenario: Reservasi Dibatalkan
     if (status === "CANCELLED") {
       await updateSessionBookingStatus(reservation.sessionId, false);
-      await createNotificationForCustomer(
-        {
-          recipientId: reservation.customerId,
-          title: "Reservasi Anda Dibatalkan",
-          message: `Reservasi Anda untuk ${reservation.service.name} telah dibatalkan.`,
-          type: "RESERVATION_CANCELLED_MANUAL",
-          referenceId: reservation.id,
-        },
-        {
-          emailOptions: {
-            templateName: "reservationCancelled",
-            templateData: {
-              customerName: reservation.customer.name,
-              serviceName: reservation.service.name,
-              reservationId: reservation.id.substring(0, 8).toUpperCase(),
-              reason:
-                "Dibatalkan oleh pihak kami. Silakan hubungi kami untuk informasi lebih lanjut.",
-            },
+
+      // Kirim email cancel HANYA jika bukan customer manual (email dummy)
+      // Cek awalan "manual_" pada email customer
+      if (!updatedReservation.customer.email.startsWith("manual_")) {
+        await createNotificationForCustomer(
+          {
+            recipientId: reservation.customerId,
+            title: "Reservasi Anda Dibatalkan",
+            message: `Reservasi Anda untuk ${reservation.service.name} telah dibatalkan.`,
+            type: "RESERVATION_CANCELLED",
+            referenceId: reservation.id,
           },
-        }
-      );
+          {
+            emailOptions: {
+              templateName: "reservationCancelled",
+              templateData: {
+                customerName: reservation.customer.name,
+                serviceName: reservation.service.name,
+                reservationId: reservation.id.substring(0, 8).toUpperCase(),
+                reason:
+                  "Dibatalkan oleh pihak kami. Silakan hubungi kami untuk informasi lebih lanjut.",
+              },
+            },
+          }
+        );
+      }
     }
 
+    // Skenario: Reservasi Selesai (COMPLETED)
     if (status === "COMPLETED") {
-      await createNotificationForCustomer(
-        {
-          recipientId: reservation.customerId,
-          title: "Layanan Telah Selesai",
-          message: `Terima kasih! Layanan ${reservation.service.name} Anda telah selesai.`,
-          type: "RESERVATION_COMPLETED",
-          referenceId: reservation.id,
-        },
-        {
-          emailOptions: {
-            templateName: "reservationCompleted",
-            templateData: {
-              customerName: reservation.customer.name,
-              serviceName: reservation.service.name,
-            },
+      // CEK: Apakah ini reservasi manual?
+      if (updatedReservation.reservationType === "MANUAL") {
+        // --- LOGIKA BARU: Generate Link WA & Kirim Email ke Owner ---
+
+        // A. Buat Token Rating
+        // (Pastikan fungsi generateRatingToken ada di scope file ini, biasanya di bagian atas file)
+        const { token, expiresAt } = generateRatingToken();
+
+        // B. Simpan token ke database reservasi
+        await prisma.reservation.update({
+          where: { id },
+          data: { ratingToken: token, ratingTokenExpiresAt: expiresAt },
+        });
+
+        // C. Buat Link
+        const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+        const ratingUrl = `${frontendUrl}/rating/${token}`;
+
+        // Buat Link WA (menggunakan helper function di bawah)
+        const whatsappLink = generateWhatsAppLink(
+          updatedReservation.customer.phoneNumber,
+          updatedReservation.customer.name,
+          ratingUrl
+        );
+
+        // D. Kirim Email ke SEMUA OWNER
+        await createNotificationForAllOwners(
+          {
+            title: "Action Needed: Kirim Rating Manual",
+            message: `Pelanggan manual ${updatedReservation.customer.name} telah selesai. Cek email Anda untuk link rating.`,
+            type: "RESERVATION_COMPLETED_MANUAL",
+            referenceId: updatedReservation.id,
           },
-        }
-      );
+          {
+            sendPush: true, // Kirim notif ke HP Owner
+            emailOptions: {
+              templateName: "ownerManualRating", // Pastikan file HTML template ini sudah dibuat
+              templateData: {
+                serviceName: updatedReservation.service.name,
+                customerName: updatedReservation.customer.name,
+                customerPhone: updatedReservation.customer.phoneNumber,
+                whatsappLink: whatsappLink, // Link ini akan jadi tombol di email
+              },
+            },
+          }
+        );
+      } else {
+        // --- LOGIKA LAMA: Reservasi Online (Kirim Email ke Customer) ---
+        await createNotificationForCustomer(
+          {
+            recipientId: updatedReservation.customerId,
+            title: "Layanan Telah Selesai",
+            message: `Terima kasih! Layanan ${updatedReservation.service.name} Anda telah selesai.`,
+            type: "RESERVATION_COMPLETED",
+            referenceId: updatedReservation.id,
+          },
+          {
+            emailOptions: {
+              templateName: "reservationCompleted",
+              templateData: {
+                customerName: updatedReservation.customer.name,
+                serviceName: updatedReservation.service.name,
+              },
+            },
+          }
+        );
+      }
     }
 
-    // 8. Kirim respons sukses
+    // 6. Return response sukses
     return res.status(200).json({
       success: true,
       message: "Reservation status updated successfully",
@@ -666,6 +726,7 @@ export const updateReservation = async (req, res) => {
     });
   }
 };
+
 /**
  * Update reservation details (name, age, notes, etc.)
  * @param {Object} req - Express request object
