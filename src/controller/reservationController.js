@@ -30,7 +30,6 @@ import {
   createTransaction,
   getTransactionDetails,
   verifyCallbackSignature,
-  verifyCallbackSignatureFromHeader,
 } from "../utils/tripay.js";
 import prisma from "../config/db.js";
 import { getServiceById } from "../repository/serviceRepository.js";
@@ -908,69 +907,36 @@ export const rescheduleReservationHandler = async (req, res) => {
  * @param {Object} res - Express response object
  */
 export const handlePaymentCallback = async (req, res) => {
-  // 1. Ambil Signature dan Event
-  const signature = req.headers["x-callback-signature"];
   const event = req.headers["x-callback-event"];
+  const reference = req.body?.reference;
 
-  console.log("\n====== [CALLBACK SECURITY CHECK] ======");
-  console.log(`Ref: ${req.body?.reference} | Event: ${event}`);
-
-  // --- DEBUGGING: CEK KEY YANG DIBACA SERVER ---
-  // Kita hanya tampilkan 4 karakter awal dan panjang kuncinya
-  // Agar Anda bisa mencocokkan dengan dashboard Tripay tanpa mengekspos full key di log
-  const privateKey = process.env.TRIPAY_PRIVATE_KEY || "";
-  const keyPrefix = privateKey.substring(0, 4);
-  const keyLength = privateKey.length;
-
-  console.log(`[DEBUG ENV] Mode: ${process.env.TRIPAY_MODE}`);
-  console.log(`[DEBUG ENV] Private Key Prefix: '${keyPrefix}****'`);
-  console.log(`[DEBUG ENV] Private Key Length: ${keyLength} chars`);
-  console.log("=======================================");
-  // -------------------------------------------
+  console.log("\n====== [CALLBACK START] ======");
+  console.log(`Ref: ${reference} | Event: ${event}`);
 
   try {
+    // 1. Validasi Payload Dasar
     const callbackData = req.body;
-
-    // 2. Validasi Payload Dasar
     if (!callbackData || !callbackData.reference || !callbackData.status) {
       console.error("[CALLBACK ERROR] Invalid payload data");
       return res.status(400).json({ success: false, message: "Invalid data" });
     }
 
-    const { reference, status, fee_merchant } = callbackData;
-
-    // 3. Verifikasi Signature (STRICT)
-    // Wajib validasi, baik di Sandbox maupun Production
-    if (!signature) {
-      console.error("[SECURITY ALERT] No signature provided in headers!");
-      return res
-        .status(403)
-        .json({ success: false, message: "No signature provided" });
-    }
-
-    // Panggil helper verifikasi
-    const isValid = verifyCallbackSignatureFromHeader(signature, callbackData);
+    // 2. VERIFIKASI SIGNATURE (RAW BODY)
+    // Cukup lempar 'req' karena utils akan mengambil header & rawBody
+    const isValid = verifyCallbackSignature(req);
 
     if (!isValid) {
-      // JIKA SIGNATURE SALAH: BERHENTI DI SINI.
-      console.error(`❌ [SECURITY FAIL] Signature Mismatch for ${reference}`);
-      console.error(`   Tripay sent: ${signature}`);
-      console.error(`   Server rejected it.`);
-
-      // Kita return HTTP 200 tapi success: false.
-      // Tujuannya agar Tripay berhenti mengirim callback (stop retry) karena ini kesalahan autentikasi yang tidak akan sembuh dengan retry.
-      // Database TIDAK DIUPDATE.
+      console.error(`❌ [SECURITY FAIL] Invalid Signature for ${reference}`);
+      // Return 200 dengan success:false agar Tripay berhenti retry (karena signature salah fatal)
       return res.status(200).json({
         success: false,
-        message: "Invalid Signature. Check Private Key configuration.",
+        message: "Invalid signature",
       });
     }
 
-    console.log(
-      `✅ [SECURITY PASS] Signature Valid. Processing transaction...`
-    );
+    console.log(`✅ [SECURITY PASS] Signature Valid.`);
 
-    // 4. Proses Database (Hanya dijalankan jika isValid === true)
+    // 3. Proses Database
     const payment = await findPaymentByTransactionIdWithFullData(reference);
 
     if (!payment) {
@@ -980,14 +946,19 @@ export const handlePaymentCallback = async (req, res) => {
         .json({ success: true, message: "Payment not found" });
     }
 
+    // Idempotency check
     if (payment.paymentStatus !== "PENDING") {
-      console.log(`[CALLBACK INFO] Transaction already processed.`);
+      console.log(
+        `[CALLBACK INFO] Already processed: ${payment.paymentStatus}`
+      );
       return res
         .status(200)
         .json({ success: true, message: "Already processed" });
     }
 
-    // 5. Mapping & Update Status
+    const { status, fee_merchant } = callbackData;
+
+    // 4. Mapping Status
     let newPaymentStatus = payment.paymentStatus;
     let newReservationStatus = payment.reservation.status;
     let shouldFreeSession = false;
@@ -1013,7 +984,9 @@ export const handlePaymentCallback = async (req, res) => {
         break;
     }
 
+    // 5. Update Database jika status berubah
     if (newPaymentStatus !== payment.paymentStatus) {
+      // a. Bebaskan sesi
       if (shouldFreeSession) {
         await updateSessionBookingStatus(
           payment.reservation.sessionId,
@@ -1021,6 +994,7 @@ export const handlePaymentCallback = async (req, res) => {
         ).catch((err) => console.error("[SESSION ERROR]", err));
       }
 
+      // b. Update Payment
       await updatePayment(payment.id, {
         paymentStatus: newPaymentStatus,
         paymentDate: newPaymentStatus === "PAID" ? new Date() : null,
@@ -1028,12 +1002,15 @@ export const handlePaymentCallback = async (req, res) => {
         merchantFee: fee_merchant ? parseFloat(fee_merchant) : null,
       });
 
+      // c. Update Reservasi
       await updateReservationStatus(
         payment.reservation.id,
         newReservationStatus
       );
 
-      // Notifikasi (Bungkus try-catch agar tidak menggagalkan response)
+      console.log(`[CALLBACK UPDATE] Status updated to ${newPaymentStatus}`);
+
+      // d. Notifikasi
       try {
         const { customer, service, id: reservationId } = payment.reservation;
         const serviceName = service?.name || "Layanan";
@@ -1065,7 +1042,8 @@ export const handlePaymentCallback = async (req, res) => {
       }
     }
 
-    // 6. Respon Sukses
+    // 6. Response Sukses
+    console.log(`[CALLBACK SUCCESS] Finished processing.`);
     return res.status(200).json({
       success: true,
       message: "Callback processed successfully",

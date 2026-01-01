@@ -6,7 +6,7 @@ import crypto from "crypto";
 const TRIPAY_MODE = process.env.TRIPAY_MODE || "sandbox";
 const TRIPAY_API_KEY = process.env.TRIPAY_API_KEY;
 
-// PERBAIKAN UTAMA: Tambahkan .trim() untuk membuang spasi/enter tersembunyi
+// PERBAIKAN 1: Tambahkan .trim() di sini agar Private Key bersih dari spasi/enter
 const TRIPAY_PRIVATE_KEY = (process.env.TRIPAY_PRIVATE_KEY || "").trim();
 
 const TRIPAY_MERCHANT_CODE = process.env.TRIPAY_MERCHANT_CODE;
@@ -39,15 +39,11 @@ const validateConfig = () => {
       `Missing required environment variables: ${missingVars.join(", ")}`
     );
   }
-
-  // Optional: Log mode untuk debugging (jangan log key full)
-  // console.log(`[TRIPAY] Running in ${TRIPAY_MODE} mode`);
 };
 
 /**
  * Get available payment channels from Tripay with retry logic
- * @param {Number} retries - Number of retries if request fails
- * @returns {Promise<Array>} List of payment channels
+ * (FUNGSI INI TETAP UTUH)
  */
 export const getPaymentChannels = async (retries = 2) => {
   validateConfig();
@@ -59,7 +55,7 @@ export const getPaymentChannels = async (retries = 2) => {
         headers: {
           Authorization: `Bearer ${TRIPAY_API_KEY}`,
         },
-        timeout: 10000, // 10 second timeout
+        timeout: 10000,
       }
     );
 
@@ -77,7 +73,6 @@ export const getPaymentChannels = async (retries = 2) => {
       error.response?.data || error.message
     );
 
-    // Implement retry logic
     if (
       retries > 0 &&
       (error.code === "ECONNABORTED" || error.response?.status >= 500)
@@ -94,11 +89,8 @@ export const getPaymentChannels = async (retries = 2) => {
 };
 
 /**
- * Calculate signature for Tripay transaction
- * @param {String} merchantCode - Merchant code
- * @param {String} merchantRef - Merchant reference (reservation ID)
- * @param {Number} amount - Transaction amount
- * @returns {String} Calculated signature
+ * Calculate signature for Tripay transaction (Creation)
+ * (FUNGSI INI TETAP UTUH)
  */
 const calculateSignature = (merchantCode, merchantRef, amount) => {
   if (!merchantCode || !merchantRef || amount === undefined) {
@@ -118,13 +110,11 @@ const calculateSignature = (merchantCode, merchantRef, amount) => {
 
 /**
  * Create a payment transaction in Tripay with validation
- * @param {Object} paymentData - Payment data
- * @returns {Promise<Object>} Transaction details from Tripay
+ * (FUNGSI INI TETAP UTUH)
  */
 export const createTransaction = async (paymentData) => {
   validateConfig();
 
-  // Validate required fields
   const requiredFields = [
     "reservationId",
     "customerName",
@@ -154,7 +144,6 @@ export const createTransaction = async (paymentData) => {
       serviceName,
     } = paymentData;
 
-    // Ensure amount is a number and has valid format (no more than 2 decimal places)
     const formattedAmount = parseFloat(parseFloat(amount).toFixed(2));
     if (isNaN(formattedAmount) || formattedAmount <= 0) {
       throw new Error("Invalid payment amount");
@@ -167,9 +156,8 @@ export const createTransaction = async (paymentData) => {
       formattedAmount
     );
 
-    // FIXED: Calculate expiry time properly - current time + 24 hours in seconds
-    const currentTime = Math.floor(Date.now() / 1000); // Current timestamp in seconds
-    const expiryTime = currentTime + 24 * 60 * 60; // Add 24 hours in seconds
+    const currentTime = Math.floor(Date.now() / 1000);
+    const expiryTime = currentTime + 24 * 60 * 60;
     const return_url = `${FRONTEND_URL}/payment/status?reservation_id=${reservationId}`;
 
     const payload = {
@@ -203,7 +191,7 @@ export const createTransaction = async (paymentData) => {
           Authorization: `Bearer ${TRIPAY_API_KEY}`,
           "Content-Type": "application/json",
         },
-        timeout: 15000, // 15 second timeout for transaction creation
+        timeout: 15000,
       }
     );
 
@@ -235,8 +223,7 @@ export const createTransaction = async (paymentData) => {
 
 /**
  * Get transaction details from Tripay with validation
- * @param {String} reference - Transaction reference
- * @returns {Promise<Object>} Transaction details
+ * (FUNGSI INI TETAP UTUH)
  */
 export const getTransactionDetails = async (reference) => {
   validateConfig();
@@ -252,7 +239,7 @@ export const getTransactionDetails = async (reference) => {
         headers: {
           Authorization: `Bearer ${TRIPAY_API_KEY}`,
         },
-        timeout: 10000, // 10 second timeout
+        timeout: 10000,
       }
     );
 
@@ -276,19 +263,61 @@ export const getTransactionDetails = async (reference) => {
 };
 
 /**
- * Verify callback signature from Tripay with enhanced security
- * (Legacy function wrapping the header verification logic)
- * @param {Object} callbackData - Callback data from Tripay
- * @returns {Boolean} Whether the signature is valid
+ * PERBAIKAN 2: FUNGSI VERIFIKASI SESUAI DOKUMENTASI
+ * Menggunakan req.rawBody dan req.headers
+ * (Menggantikan verifyCallbackSignature lama & verifyCallbackSignatureFromHeader)
  */
-export const verifyCallbackSignature = (callbackData) => {
-  // Jika signature ada di body (jarang terjadi di update baru Tripay), gunakan itu
-  // Jika tidak, logic ini biasanya dipanggil dengan signature dari header di controller
-  const signature = callbackData.signature || "";
-  return verifyCallbackSignatureFromHeader(signature, callbackData);
+export const verifyCallbackSignature = (req) => {
+  try {
+    validateConfig();
+
+    // 1. Ambil Signature dari Header
+    const signatureFromHeader = req.headers["x-callback-signature"];
+
+    // 2. Ambil RAW BODY (String JSON asli)
+    // Pastikan app.js sudah dikonfigurasi untuk menangkap rawBody!
+    const rawBody = req.rawBody;
+
+    if (!signatureFromHeader) {
+      console.error("[TRIPAY] Missing X-Callback-Signature header");
+      return false;
+    }
+
+    if (!rawBody) {
+      console.error(
+        "[TRIPAY] Raw body is missing. Please check app.js configuration."
+      );
+      return false;
+    }
+
+    // 3. Generate Signature: HMAC-SHA256(Raw JSON Body, Private Key)
+    // Private Key sudah di-trim di bagian atas file
+    const calculatedSignature = crypto
+      .createHmac("sha256", TRIPAY_PRIVATE_KEY)
+      .update(rawBody)
+      .digest("hex");
+
+    const isValid = signatureFromHeader === calculatedSignature;
+
+    if (!isValid) {
+      console.error(`[TRIPAY VALIDATION FAIL]`);
+      console.error(`-- Header: ${signatureFromHeader}`);
+      console.error(`-- Calculated: ${calculatedSignature}`);
+    } else {
+      console.log(`[TRIPAY VALIDATION] Signature Valid!`);
+    }
+
+    return isValid;
+  } catch (error) {
+    console.error("[TRIPAY ERROR] Verify signature:", error.message);
+    return false;
+  }
 };
 
-// Test function untuk development
+/**
+ * Test function untuk development
+ * (FUNGSI INI TETAP UTUH)
+ */
 export const testTripayConnection = async () => {
   try {
     console.log("[TRIPAY TEST] Testing connection...");
@@ -297,53 +326,6 @@ export const testTripayConnection = async () => {
     return true;
   } catch (error) {
     console.error("[TRIPAY TEST] Connection failed:", error.message);
-    return false;
-  }
-};
-
-/**
- * Validasi Signature dari HEADER (Metode Utama Tripay saat ini)
- * Menggunakan TRIPAY_PRIVATE_KEY yang sudah di-TRIM di atas.
- */
-export const verifyCallbackSignatureFromHeader = (
-  headerSignature,
-  callbackData
-) => {
-  try {
-    validateConfig();
-
-    const { merchant_ref, reference, status } = callbackData;
-
-    if (!merchant_ref || !reference || !status || !headerSignature) {
-      console.error(
-        "[TRIPAY CALLBACK] Missing data for header signature verification"
-      );
-      return false;
-    }
-
-    const signatureString = `${merchant_ref}${reference}${status}`;
-
-    // TRIPAY_PRIVATE_KEY di sini mengacu pada variabel global di atas yang sudah di-.trim()
-    const validSignature = crypto
-      .createHmac("sha256", TRIPAY_PRIVATE_KEY)
-      .update(signatureString)
-      .digest("hex");
-
-    const isValid = headerSignature === validSignature;
-
-    if (!isValid) {
-      console.error(`[TRIPAY VALIDATION FAIL]`);
-      console.error(`-- Expected: ${validSignature}`);
-      console.error(`-- Received: ${headerSignature}`);
-      // Log ini membantu memastikan apakah data inputnya yang beda
-      console.error(`-- Data String: ${signatureString}`);
-    } else {
-      console.log(`[TRIPAY VALIDATION] Signature Valid for ${reference}`);
-    }
-
-    return isValid;
-  } catch (error) {
-    console.error("[TRIPAY ERROR] Verify header signature:", error.message);
     return false;
   }
 };

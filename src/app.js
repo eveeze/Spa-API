@@ -1,4 +1,4 @@
-// app.js
+// src/app.js
 
 import express from "express";
 import cors from "cors";
@@ -33,7 +33,19 @@ const io = new Server(server, {
 });
 
 app.use(cors());
-app.use(express.json());
+
+// === PERUBAHAN UTAMA DI SINI ===
+// Kita tambahkan opsi 'verify' untuk menangkap Raw Body
+// Ini diperlukan untuk verifikasi Signature Tripay
+app.use(
+  express.json({
+    verify: (req, res, buf) => {
+      req.rawBody = buf.toString();
+    },
+  })
+);
+// ===============================
+
 app.use(express.urlencoded({ extended: true }));
 
 let onlineUsers = new Map();
