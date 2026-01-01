@@ -908,89 +908,86 @@ export const rescheduleReservationHandler = async (req, res) => {
  * @param {Object} res - Express response object
  */
 export const handlePaymentCallback = async (req, res) => {
-  // 1. Ambil Signature dan Event dari Header (Bukan Body)
+  // 1. Ambil Signature dan Event
   const signature = req.headers["x-callback-signature"];
   const event = req.headers["x-callback-event"];
 
-  console.log(`[CALLBACK START] Ref: ${req.body?.reference} | Event: ${event}`);
+  console.log("\n====== [CALLBACK SECURITY CHECK] ======");
+  console.log(`Ref: ${req.body?.reference} | Event: ${event}`);
+
+  // --- DEBUGGING: CEK KEY YANG DIBACA SERVER ---
+  // Kita hanya tampilkan 4 karakter awal dan panjang kuncinya
+  // Agar Anda bisa mencocokkan dengan dashboard Tripay tanpa mengekspos full key di log
+  const privateKey = process.env.TRIPAY_PRIVATE_KEY || "";
+  const keyPrefix = privateKey.substring(0, 4);
+  const keyLength = privateKey.length;
+
+  console.log(`[DEBUG ENV] Mode: ${process.env.TRIPAY_MODE}`);
+  console.log(`[DEBUG ENV] Private Key Prefix: '${keyPrefix}****'`);
+  console.log(`[DEBUG ENV] Private Key Length: ${keyLength} chars`);
+  console.log("=======================================");
+  // -------------------------------------------
 
   try {
     const callbackData = req.body;
 
     // 2. Validasi Payload Dasar
-    // Pastikan data penting ada sebelum diproses
     if (!callbackData || !callbackData.reference || !callbackData.status) {
       console.error("[CALLBACK ERROR] Invalid payload data");
-      return res.status(400).json({
-        success: false,
-        message: "Invalid callback data",
-      });
+      return res.status(400).json({ success: false, message: "Invalid data" });
     }
 
-    const { reference, status, fee_merchant, merchant_ref } = callbackData;
+    const { reference, status, fee_merchant } = callbackData;
 
-    // 3. Verifikasi Signature (KEAMANAN)
-    // Wajib untuk memastikan request benar-benar dari Tripay
-    if (
-      process.env.NODE_ENV === "production" ||
-      process.env.TRIPAY_MODE === "production"
-    ) {
-      // Cek keberadaan signature di header
-      if (!signature) {
-        console.error("[CALLBACK ERROR] No signature found in headers");
-        return res
-          .status(403)
-          .json({ success: false, message: "No signature provided" });
-      }
+    // 3. Verifikasi Signature (STRICT)
+    // Wajib validasi, baik di Sandbox maupun Production
+    if (!signature) {
+      console.error("[SECURITY ALERT] No signature provided in headers!");
+      return res
+        .status(403)
+        .json({ success: false, message: "No signature provided" });
+    }
 
-      // Gunakan helper verifyCallbackSignatureFromHeader dari utils/tripay.js
-      const isValid = verifyCallbackSignatureFromHeader(
-        signature,
-        callbackData
-      );
+    // Panggil helper verifikasi
+    const isValid = verifyCallbackSignatureFromHeader(signature, callbackData);
 
-      if (!isValid) {
-        console.error(
-          `[CALLBACK ERROR] Invalid Signature for Ref: ${reference}`
-        );
+    if (!isValid) {
+      // JIKA SIGNATURE SALAH: BERHENTI DI SINI.
+      console.error(`❌ [SECURITY FAIL] Signature Mismatch for ${reference}`);
+      console.error(`   Tripay sent: ${signature}`);
+      console.error(`   Server rejected it.`);
 
-        // Return success: false, tapi status 200 agar Tripay tidak retry terus menerus (karena signature salah tidak akan bisa diperbaiki dengan retry)
-        return res.status(200).json({
-          success: false,
-          message: "Invalid signature detected",
-        });
-      }
+      // Kita return HTTP 200 tapi success: false.
+      // Tujuannya agar Tripay berhenti mengirim callback (stop retry) karena ini kesalahan autentikasi yang tidak akan sembuh dengan retry.
+      // Database TIDAK DIUPDATE.
+      return res.status(200).json({
+        success: false,
+        message: "Invalid Signature. Check Private Key configuration.",
+      });
     }
 
     console.log(
-      `[CALLBACK PROCESS] Status: ${status} for Transaction: ${reference}`
+      `✅ [SECURITY PASS] Signature Valid. Processing transaction...`
     );
 
-    // 4. Cek Data Pembayaran di Database
+    // 4. Proses Database (Hanya dijalankan jika isValid === true)
     const payment = await findPaymentByTransactionIdWithFullData(reference);
 
     if (!payment) {
-      console.error(`[CALLBACK ERROR] Payment not found in DB: ${reference}`);
-      // Return success: true agar Tripay BERHENTI mengirim callback untuk transaksi yang tidak ada di DB kita
-      return res.status(200).json({
-        success: true,
-        message: "Payment not found but callback acknowledged",
-      });
+      console.error(`[CALLBACK ERROR] Payment not found: ${reference}`);
+      return res
+        .status(200)
+        .json({ success: true, message: "Payment not found" });
     }
 
-    // 5. Cek Idempotency (Apakah sudah selesai sebelumnya?)
-    // Jika status di DB bukan PENDING, berarti sudah pernah diproses. Jangan proses ulang.
     if (payment.paymentStatus !== "PENDING") {
-      console.log(
-        `[CALLBACK INFO] Transaction ${reference} already processed (Current Status: ${payment.paymentStatus}).`
-      );
-      return res.status(200).json({
-        success: true,
-        message: "Payment already processed",
-      });
+      console.log(`[CALLBACK INFO] Transaction already processed.`);
+      return res
+        .status(200)
+        .json({ success: true, message: "Already processed" });
     }
 
-    // 6. Mapping Status Tripay ke Status Database
+    // 5. Mapping & Update Status
     let newPaymentStatus = payment.paymentStatus;
     let newReservationStatus = payment.reservation.status;
     let shouldFreeSession = false;
@@ -1012,23 +1009,18 @@ export const handlePaymentCallback = async (req, res) => {
         shouldFreeSession = true;
         break;
       default:
-        console.log(`[CALLBACK WARN] Unhandled status from Tripay: ${status}`);
+        console.log(`[CALLBACK WARN] Unhandled status: ${status}`);
         break;
     }
 
-    // 7. Eksekusi Update ke Database
     if (newPaymentStatus !== payment.paymentStatus) {
-      // a. Kembalikan slot sesi jika batal/expired
       if (shouldFreeSession) {
         await updateSessionBookingStatus(
           payment.reservation.sessionId,
           false
-        ).catch((err) =>
-          console.error("[SESSION ERROR] Failed to free session:", err)
-        );
+        ).catch((err) => console.error("[SESSION ERROR]", err));
       }
 
-      // b. Update Tabel Payment
       await updatePayment(payment.id, {
         paymentStatus: newPaymentStatus,
         paymentDate: newPaymentStatus === "PAID" ? new Date() : null,
@@ -1036,99 +1028,50 @@ export const handlePaymentCallback = async (req, res) => {
         merchantFee: fee_merchant ? parseFloat(fee_merchant) : null,
       });
 
-      // c. Update Tabel Reservation
       await updateReservationStatus(
         payment.reservation.id,
         newReservationStatus
       );
 
-      console.log(
-        `[CALLBACK UPDATE] DB Updated. New Status: ${newPaymentStatus}`
-      );
-
-      // d. Kirim Notifikasi (Background Process)
-      // Dibungkus try-catch terpisah agar jika notif gagal, callback Tripay tetap SUKSES
+      // Notifikasi (Bungkus try-catch agar tidak menggagalkan response)
       try {
         const { customer, service, id: reservationId } = payment.reservation;
         const serviceName = service?.name || "Layanan";
 
         if (newReservationStatus === "CONFIRMED") {
-          // Notifikasi ke Owner
           await createNotificationForAllOwners(
             {
-              title: `Pembayaran Masuk`,
-              message: `Pembayaran ${serviceName} dari ${customer.name} telah LUNAS.`,
+              title: "Pembayaran Masuk",
+              message: `Lunas: ${serviceName} - ${customer.name}`,
               type: "PAYMENT_SUCCESS",
               referenceId: reservationId,
             },
             { sendPush: true }
           );
 
-          // Notifikasi ke Customer
           await createNotificationForCustomer(
             {
               recipientId: customer.id,
-              title: "Pembayaran Berhasil!",
-              message: `Reservasi Anda untuk ${serviceName} telah dikonfirmasi.`,
+              title: "Pembayaran Berhasil",
+              message: `Reservasi ${serviceName} dikonfirmasi.`,
               type: "PAYMENT_SUCCESS",
               referenceId: reservationId,
             },
-            {
-              sendPush: true,
-              emailOptions: {
-                templateName: "reservationConfirmed",
-                templateData: {
-                  customerName: customer.name,
-                  serviceName: serviceName,
-                  reservationId: reservationId.substring(0, 8).toUpperCase(),
-                },
-              },
-            }
-          );
-        } else if (["EXPIRED", "CANCELLED"].includes(newReservationStatus)) {
-          // Notifikasi Gagal ke Customer
-          await createNotificationForCustomer(
-            {
-              recipientId: customer.id,
-              title: "Reservasi Dibatalkan",
-              message: `Pembayaran gagal atau kadaluarsa (Status: ${status}).`,
-              type: "RESERVATION_CANCELLED_AUTO",
-              referenceId: reservationId,
-            },
-            {
-              emailOptions: {
-                templateName: "reservationCancelled",
-                templateData: {
-                  customerName: customer.name,
-                  serviceName: serviceName,
-                  reservationId: reservationId.substring(0, 8).toUpperCase(),
-                  reason: `Pembayaran status: ${status}`,
-                },
-              },
-            }
+            { sendPush: true }
           );
         }
       } catch (notifError) {
-        console.error(
-          "[CALLBACK NOTIF ERROR] Notification failed:",
-          notifError.message
-        );
-        // Error notif diabaikan agar flow pembayaran tetap dianggap sukses
+        console.error("[NOTIF ERROR]", notifError.message);
       }
     }
 
-    // 8. RESPON SUKSES (PENTING!)
-    // Mengembalikan JSON { success: true } adalah syarat agar Tripay mencatat IPN "BERHASIL"
-    console.log(`[CALLBACK SUCCESS] Finished processing ref: ${reference}`);
+    // 6. Respon Sukses
     return res.status(200).json({
       success: true,
       message: "Callback processed successfully",
     });
   } catch (error) {
-    console.error(`[CALLBACK FATAL ERROR] ${error.message}`, error);
-
-    // Jika error server internal (database down, dll), kirim 500.
-    // Tripay akan mencoba mengirim ulang callback (Retry) nanti.
+    console.error(`[CALLBACK FATAL ERROR]`, error);
     return res.status(500).json({
       success: false,
       message: "Internal Server Error",
